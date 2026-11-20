@@ -20,6 +20,7 @@ class TextureDownscalerTool(mobase.IPluginTool):
     def __init__(self):
         super().__init__()
         self._organizer: mobase.IOrganizer | None = None
+        self._output_created = False
 
     # ---- IPlugin ---------------------------------------------------------------------------
 
@@ -149,14 +150,35 @@ class TextureDownscalerTool(mobase.IPluginTool):
                     self._parentWidget(), "Texture Downscaler", f"Could not create the mod '{output_name}'."
                 )
                 return None
+            # MO2 only lists the new mod after a refresh; that happens in _on_output_written.
+            self._output_created = True
+        return Path(mod.absolutePath())
+
+    def _on_output_written(self, output_name: str) -> None:
+        org = self._organizer
+        if not self._output_created:
+            mod = org.modList().getMod(output_name)
+            if mod is not None:
+                org.modDataChanged(mod)
+            return
+
+        # Freshly created mod: refresh so MO2 shows it, then enable it and move it to the bottom.
+        self._output_created = False
+
+        def activate() -> None:
+            mod_list = org.modList()
+            if mod_list.getMod(output_name) is None:
+                return
             try:
                 mod_list.setActive(output_name, True)
                 mod_list.setPriority(output_name, len(mod_list.allMods()) - 1)
             except Exception:
-                pass  # user can enable/move it manually; the end-of-run message says so
-        return Path(mod.absolutePath())
+                pass  # the end-of-run message tells the user to enable/move it
 
-    def _on_output_written(self, output_name: str) -> None:
-        mod = self._organizer.modList().getMod(output_name)
-        if mod is not None:
-            self._organizer.modDataChanged(mod)
+        try:
+            org.onNextRefresh(activate, False)
+        except Exception:
+            org.refresh()
+            activate()
+            return
+        org.refresh()

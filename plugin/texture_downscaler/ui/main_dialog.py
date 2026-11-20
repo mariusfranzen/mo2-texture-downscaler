@@ -166,6 +166,11 @@ class MainDialog(QDialog):
             self.hide_combo.addItem("Show all sizes" if d == 0 else f"Hide smaller than {fmt_dim(d)}", d)
         self.hide_combo.setCurrentIndex(self.hide_combo.findData(2048))
         self.only_marked = QCheckBox("Only marked")
+        self.hidden_mods: set[str] = set()
+        self.unhide_btn = QPushButton()
+        self.unhide_btn.setToolTip("Show all mods you hid via right-click again")
+        self.unhide_btn.clicked.connect(self._unhide_all_mods)
+        self.unhide_btn.setVisible(False)
 
         filters.addWidget(self.search, 3)
         filters.addWidget(QLabel("Mod:"))
@@ -174,6 +179,7 @@ class MainDialog(QDialog):
         filters.addWidget(self.type_combo)
         filters.addWidget(self.hide_combo)
         filters.addWidget(self.only_marked)
+        filters.addWidget(self.unhide_btn)
         root.addLayout(filters)
 
         self.search.textChanged.connect(self._apply_filters)
@@ -350,6 +356,7 @@ class MainDialog(QDialog):
         self.proxy.set_filters(
             min_dim=self.hide_combo.currentData() or 0,
             mod=self.mod_combo.currentData(),
+            hidden_mods=frozenset(self.hidden_mods),
             ttype=self.type_combo.currentData(),
             text=self.search.text(),
             only_targeted=self.only_marked.isChecked(),
@@ -429,6 +436,13 @@ class MainDialog(QDialog):
         menu.addAction("Keep original (clear target)", lambda: self._set_selected(None))
         menu.addSeparator()
 
+        selected_mods = sorted({self.model.entries[r].mod for r in rows} | {entry.mod}, key=str.lower)
+        hide_label = (
+            f'Hide mod "{selected_mods[0]}"' if len(selected_mods) == 1 else f"Hide {len(selected_mods)} mods"
+        )
+        menu.addAction(hide_label, lambda: self._hide_mods(selected_mods))
+        if self.hidden_mods:
+            menu.addAction(f"Unhide all mods ({len(self.hidden_mods)})", self._unhide_all_mods)
         menu.addAction(f'Show only mod "{entry.mod}"', lambda: self._filter_mod(entry.mod))
         folder = entry.virtual_path.rsplit("/", 1)[0] + "/"
         menu.addAction(f'Show only folder "{folder}"', lambda: self._filter_folder(folder))
@@ -440,6 +454,26 @@ class MainDialog(QDialog):
     def _filter_mod(self, mod: str) -> None:
         self.mod_combo.setCurrentIndex(max(0, self.mod_combo.findData(mod)))
 
+    def _hide_mods(self, mods: list[str]) -> None:
+        self.hidden_mods.update(mods)
+        if self.mod_combo.currentData() in self.hidden_mods:
+            self.mod_combo.blockSignals(True)
+            self.mod_combo.setCurrentIndex(0)
+            self.mod_combo.blockSignals(False)
+        self._update_unhide_button()
+        self._apply_filters()
+
+    def _unhide_all_mods(self) -> None:
+        self.hidden_mods.clear()
+        self._update_unhide_button()
+        self._apply_filters()
+
+    def _update_unhide_button(self) -> None:
+        n = len(self.hidden_mods)
+        self.unhide_btn.setText(f"Unhide {n} mod{'s' if n != 1 else ''}")
+        self.unhide_btn.setToolTip("Hidden: " + ", ".join(sorted(self.hidden_mods, key=str.lower)))
+        self.unhide_btn.setVisible(n > 0)
+
     def _filter_folder(self, folder: str) -> None:
         self.search.setText(folder.lower())
 
@@ -448,6 +482,7 @@ class MainDialog(QDialog):
         self.mod_combo.setCurrentIndex(0)
         self.type_combo.setCurrentIndex(0)
         self.only_marked.setChecked(False)
+        self._unhide_all_mods()
 
     # ================================================================================ run ====
 

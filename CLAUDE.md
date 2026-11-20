@@ -22,7 +22,8 @@ to what resolution. Output goes to a separate mod; original mod files are never 
 - **Encoder:** `texconv.exe` (Microsoft DirectXTex, MIT) is bundled in
   `plugin/texture_downscaler/bin/` with its license.
 - **Bulk selection tools:** size rule ("larger than X → Y"), max size per texture type, set/clear
-  target for selected rows, filter by mod / folder / search text / type, and a
+  target for selected rows, filter by mod / folder / search text / type, right-click "Hide mod"
+  (session only; hidden mods are untouched by bulk actions), and a
   "hide textures smaller than N" filter. Bulk actions apply to the rows currently shown.
 
 ## Layout
@@ -60,6 +61,8 @@ scripts/dev_link.ps1            # junction plugin into an MO2 install
   - deletes outputs whose target was cleared or whose source is no longer in any enabled mod,
   - in rebuild mode deletes all previous outputs first.
   Only files listed in the manifest are ever deleted.
+- A newly created output mod only appears in MO2 after `organizer.refresh()`; enabling and
+  moving it to the bottom is done in an `onNextRefresh` callback (before that, MO2 ignores it).
 - MO2 API calls happen on the main thread. Scanning and texconv run in `QThread`s.
   texconv processes run in parallel (plugin setting `workers`, 0 = auto).
 

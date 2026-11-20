@@ -149,3 +149,95 @@ def test_plugin_glue_with_stub_mobase(app, tmp_path, monkeypatch):
     sources = plugin._collect_sources("Texture Downscaler Output")
     assert [s.name for s in sources] == ["On"]
     assert plugin.name() == "Texture Downscaler"
+
+
+def test_hide_mods(app, tmp_path):
+    from texture_downscaler.ui.main_dialog import MainDialog
+
+    b = tmp_path / "mods" / "Mod B"
+    write_fake_dds(b / "textures" / "b" / "x.dds", 4096, 4096)
+    sources = [*_make_mods(tmp_path), LooseModSource("Mod B", b)]
+    dlg = MainDialog(
+        sources=sources,
+        output_dir=tmp_path / "out",
+        output_name="Output",
+        mode=RunMode.SKIP_DONE,
+        workers=1,
+        ensure_output_mod=lambda: None,
+        on_output_written=lambda: None,
+    )
+    _wait(app, lambda: dlg.run_btn.isEnabled())
+    dlg.hide_combo.setCurrentIndex(dlg.hide_combo.findData(0))
+    assert dlg.proxy.rowCount() == 4
+
+    dlg._hide_mods(["Mod A"])
+    assert dlg.proxy.rowCount() == 1 and not dlg.unhide_btn.isHidden()
+    assert dlg.unhide_btn.text() == "Unhide 1 mod"
+    # Bulk actions only touch shown rows, so hidden mods are left alone.
+    dlg.rule_above.setCurrentIndex(dlg.rule_above.findData(128))
+    dlg.rule_target.setCurrentIndex(dlg.rule_target.findData(128))
+    dlg._apply_size_rule()
+    assert [e.mod for e in dlg.model.entries if e.target] == ["Mod B"]
+
+    dlg._unhide_all_mods()
+    assert dlg.proxy.rowCount() == 4 and dlg.unhide_btn.isHidden()
+    dlg.done(0)
+
+
+def test_new_output_mod_is_refreshed_then_activated(tmp_path, monkeypatch):
+    calls = []
+    callbacks = []
+
+    class ModState(enum.IntFlag):
+        ACTIVE = 2
+
+    class Base:
+        def __init__(self):
+            pass
+
+        def _parentWidget(self):
+            return None
+
+    stub = types.SimpleNamespace(
+        IPluginTool=Base,
+        IOrganizer=object,
+        VersionInfo=lambda *a: a,
+        PluginSetting=lambda *a: a,
+        ModState=ModState,
+        GuessedString=str,
+    )
+    monkeypatch.setitem(sys.modules, "mobase", stub)
+    sys.modules.pop("texture_downscaler.plugin", None)
+    from texture_downscaler.plugin import TextureDownscalerTool
+
+    known: dict = {}
+    new_mod = types.SimpleNamespace(absolutePath=lambda: str(tmp_path / "Out"))
+    mod_list = types.SimpleNamespace(
+        getMod=lambda n: known.get(n),
+        allMods=lambda: ["a", "b", "Out"],
+        setActive=lambda n, v: calls.append(("active", n, v)),
+        setPriority=lambda n, p: calls.append(("priority", n, p)),
+    )
+
+    def refresh(*_):
+        calls.append("refresh")
+        known["Out"] = new_mod  # MO2 only knows the mod after a refresh
+        for cb in callbacks:
+            cb()
+
+    org = types.SimpleNamespace(
+        modList=lambda: mod_list,
+        createMod=lambda name: new_mod,
+        refresh=refresh,
+        onNextRefresh=lambda cb, immediate: callbacks.append(cb) or True,
+        modDataChanged=lambda m: calls.append("changed"),
+    )
+    plugin = TextureDownscalerTool()
+    plugin.init(org)
+    assert plugin._ensure_output_mod("Out") == tmp_path / "Out"
+    plugin._on_output_written("Out")
+    assert calls == ["refresh", ("active", "Out", True), ("priority", "Out", 2)]
+
+    calls.clear()
+    plugin._on_output_written("Out")  # existing mod: cheap update only
+    assert calls == ["changed"]

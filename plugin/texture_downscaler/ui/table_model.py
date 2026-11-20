@@ -160,6 +160,7 @@ class TextureFilterProxy(QSortFilterProxyModel):
         super().__init__(parent)
         self.min_dim = 0
         self.mod: str | None = None
+        self.hidden_mods: frozenset[str] = frozenset()
         self.ttype: TextureType | None = None
         self.text_terms: list[str] = []
         self.only_targeted = False
@@ -171,12 +172,14 @@ class TextureFilterProxy(QSortFilterProxyModel):
         *,
         min_dim: int,
         mod: str | None,
+        hidden_mods: frozenset[str] = frozenset(),
         ttype: TextureType | None,
         text: str,
         only_targeted: bool,
     ) -> None:
         self.min_dim = min_dim
         self.mod = mod
+        self.hidden_mods = hidden_mods
         self.ttype = ttype
         self.text_terms = [t for t in text.lower().replace("\\", "/").split() if t]
         self.only_targeted = only_targeted
@@ -187,6 +190,8 @@ class TextureFilterProxy(QSortFilterProxyModel):
         if e.max_dim < self.min_dim:
             return False
         if self.mod is not None and e.mod != self.mod:
+            return False
+        if e.mod in self.hidden_mods:
             return False
         if self.ttype is not None and e.ttype is not self.ttype:
             return False
