@@ -68,9 +68,12 @@ try {
         "texture_downscaler/bin/LICENSE-texconv.txt"
     )
     $missing = @($required | Where-Object { $names -notcontains $_ })
-    if ($missing.Count) { throw "ZIP is missing: $($missing -join ', ')" }
     $unwanted = @($names | Where-Object { $_ -match '__pycache__|\.pyc$|(^|/)tests/' })
-    if ($unwanted.Count) { throw "ZIP contains unwanted files: $($unwanted -join ', ')" }
+    if ($missing.Count -or $unwanted.Count) {
+        Remove-Item $zip  # never leave a broken ZIP lying around to be uploaded by mistake
+        if ($missing.Count) { throw "ZIP is missing: $($missing -join ', ')" }
+        throw "ZIP contains unwanted files: $($unwanted -join ', ')"
+    }
 
     $files = @($names | Where-Object { -not $_.EndsWith("/") })
     $sizeKb = [math]::Round((Get-Item $zip).Length / 1KB)
