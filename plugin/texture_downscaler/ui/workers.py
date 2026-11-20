@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import traceback
+from collections.abc import Callable
 from pathlib import Path
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from ..core import output
+from ..core import nexus, output
 from ..core.downscaler import JobResult, run_jobs
 from ..core.header_cache import HeaderCache
+from ..core.nexus import AuthorCache, NexusRef
 from ..core.output import Manifest, Plan
 from ..core.scanner import TextureEntry, TextureSource, scan
 
@@ -87,3 +89,45 @@ class DownscaleWorker(QThread):
         )
         self.manifest.save(self.output_dir)
         self.done.emit(results)
+
+
+class AuthorWorker(QThread):
+    """Looks up Nexus uploaders for mods that aren't in the author cache yet."""
+
+    found = pyqtSignal(str, str)  # NexusRef.key, uploader ("" = not found)
+    progress = pyqtSignal(int, int)
+    finished_msg = pyqtSignal(str)
+
+    def __init__(
+        self,
+        refs: list[NexusRef],
+        cache: AuthorCache,
+        api_key_provider: Callable[[], str | None],
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.refs = refs
+        self.cache = cache
+        self.api_key_provider = api_key_provider
+        self.cancel = False
+
+    def run(self):
+        try:
+            api_key = self.api_key_provider()
+            if not api_key:
+                self.finished_msg.emit(
+                    "Authors: no Nexus API key found. Log in to Nexus in MO2's settings (Nexus tab)."
+                )
+                return
+            total = len(self.refs)
+            count = [0]
+
+            def on_result(ref: NexusRef, author: str) -> None:
+                count[0] += 1
+                self.found.emit(ref.key, author)
+                self.progress.emit(count[0], total)
+
+            msg = nexus.fetch_missing(self.refs, self.cache, api_key, on_result, lambda: self.cancel)
+            self.finished_msg.emit(msg)
+        except Exception:
+            self.finished_msg.emit("Authors: lookup failed.\n" + traceback.format_exc(limit=3))

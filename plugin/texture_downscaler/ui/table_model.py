@@ -6,6 +6,7 @@ from PyQt6.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel
 from PyQt6.QtGui import QBrush, QColor, QFont
 
 from ..core.downscaler import estimated_size, target_size
+from ..core.nexus import UNKNOWN
 from ..core.scanner import TextureEntry
 from ..core.texture_types import TextureType
 
@@ -13,8 +14,30 @@ ENTRY_ROLE = Qt.ItemDataRole.UserRole + 2
 
 TARGET_CHOICES: list[int] = [8192, 4096, 2048, 1024, 512, 256, 128]
 
-COL_PATH, COL_MOD, COL_TYPE, COL_RES, COL_FORMAT, COL_SIZE, COL_TARGET, COL_NEW, COL_STATUS = range(9)
-HEADERS = ["Texture", "Mod", "Type", "Resolution", "Format", "Size", "Downscale to", "New size", "Status"]
+(
+    COL_PATH,
+    COL_MOD,
+    COL_AUTHOR,
+    COL_TYPE,
+    COL_RES,
+    COL_FORMAT,
+    COL_SIZE,
+    COL_TARGET,
+    COL_NEW,
+    COL_STATUS,
+) = range(10)
+HEADERS = [
+    "Texture",
+    "Mod",
+    "Author",
+    "Type",
+    "Resolution",
+    "Format",
+    "Size",
+    "Downscale to",
+    "New size",
+    "Status",
+]
 
 
 def fmt_bytes(n: float) -> str:
@@ -33,6 +56,7 @@ class TextureTableModel(QAbstractTableModel):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.entries: list[TextureEntry] = []
+        self.mod_authors: dict[str, str] = {}  # mod name -> Nexus uploader (or "Unknown")
         self._bold = QFont()
         self._bold.setBold(True)
         self._target_brush = QBrush(QColor(70, 140, 255, 45))
@@ -72,6 +96,14 @@ class TextureTableModel(QAbstractTableModel):
             old_indexes, [self.index(new_pos[i.row()], i.column()) for i in old_indexes]
         )
         self.layoutChanged.emit()
+
+    def author(self, e: TextureEntry) -> str:
+        return self.mod_authors.get(e.mod, "")
+
+    def set_mod_authors(self, authors: dict[str, str]) -> None:
+        self.mod_authors.update(authors)
+        if self.entries:
+            self.dataChanged.emit(self.index(0, COL_AUTHOR), self.index(len(self.entries) - 1, COL_AUTHOR))
 
     def refresh_rows(self) -> None:
         if self.entries:
@@ -117,6 +149,11 @@ class TextureTableModel(QAbstractTableModel):
                 return f"{e.virtual_path}\n{e.abs_path}"
             if col == COL_MOD and e.provider_count > 1:
                 return f"Winning file. Provided by {e.provider_count} mods in total."
+            if col == COL_AUTHOR:
+                author = self.author(e)
+                if not author:
+                    return "Looking up the uploader on Nexus Mods..."
+                return "Nexus uploader" if author != UNKNOWN else "Not a Nexus mod, or not found on Nexus"
         if role == Qt.ItemDataRole.TextAlignmentRole and col in (COL_RES, COL_SIZE, COL_TARGET, COL_NEW):
             return int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         return None
@@ -127,12 +164,13 @@ class TextureTableModel(QAbstractTableModel):
         self.set_target([index.row()], value)
         return True
 
-    @staticmethod
-    def _display(e: TextureEntry, col: int) -> str:
+    def _display(self, e: TextureEntry, col: int) -> str:
         if col == COL_PATH:
             return e.virtual_path
         if col == COL_MOD:
             return e.mod
+        if col == COL_AUTHOR:
+            return self.author(e) or "..."
         if col == COL_TYPE:
             return e.ttype.value
         if col == COL_RES:
@@ -152,8 +190,7 @@ class TextureTableModel(QAbstractTableModel):
             return e.status
         return ""
 
-    @staticmethod
-    def _sort_key(e: TextureEntry, col: int):
+    def sort_key(self, e: TextureEntry, col: int):
         if col == COL_RES:
             return e.info.width * e.info.height
         if col == COL_SIZE:
@@ -162,7 +199,7 @@ class TextureTableModel(QAbstractTableModel):
             return e.target or 0
         if col == COL_NEW:
             return estimated_size(e.size, e.info, e.target)
-        return TextureTableModel._display(e, col).lower()
+        return self._display(e, col).lower()
 
 
 class TextureFilterProxy(QSortFilterProxyModel):
@@ -171,6 +208,7 @@ class TextureFilterProxy(QSortFilterProxyModel):
         self.min_dim = 0
         self.mod: str | None = None
         self.hidden_mods: frozenset[str] = frozenset()
+        self.hidden_authors: frozenset[str] = frozenset()
         self.ttype: TextureType | None = None
         self.text_terms: list[str] = []
         self.only_targeted = False
@@ -187,6 +225,7 @@ class TextureFilterProxy(QSortFilterProxyModel):
         min_dim: int,
         mod: str | None,
         hidden_mods: frozenset[str] = frozenset(),
+        hidden_authors: frozenset[str] = frozenset(),
         ttype: TextureType | None,
         text: str,
         only_targeted: bool,
@@ -195,6 +234,7 @@ class TextureFilterProxy(QSortFilterProxyModel):
         self.min_dim = min_dim
         self.mod = mod
         self.hidden_mods = hidden_mods
+        self.hidden_authors = hidden_authors
         self.ttype = ttype
         self.text_terms = [t for t in text.lower().replace("\\", "/").split() if t]
         self.only_targeted = only_targeted
@@ -202,12 +242,15 @@ class TextureFilterProxy(QSortFilterProxyModel):
         self.invalidateFilter()
 
     def filterAcceptsRow(self, source_row, source_parent):
-        e: TextureEntry = self.sourceModel().entries[source_row]
+        model: TextureTableModel = self.sourceModel()
+        e: TextureEntry = model.entries[source_row]
         if e.max_dim < self.min_dim:
             return False
         if self.mod is not None and e.mod != self.mod:
             return False
         if e.mod in self.hidden_mods:
+            return False
+        if self.hidden_authors and model.author(e) in self.hidden_authors:
             return False
         if self.ttype is not None and e.ttype is not self.ttype:
             return False
@@ -217,7 +260,7 @@ class TextureFilterProxy(QSortFilterProxyModel):
         if self.hide_done and e.done_target is not None and e.target == e.done_target:
             return False
         if self.text_terms:
-            haystack = e.key + " " + e.mod.lower()
+            haystack = f"{e.key} {e.mod.lower()} {model.author(e).lower()}"
             if not all(t in haystack for t in self.text_terms):
                 return False
         return True
@@ -251,7 +294,7 @@ class TextureFilterProxy(QSortFilterProxyModel):
         model: TextureTableModel = self.sourceModel()
         if column < 0 or not model.entries:
             return
-        key = TextureTableModel._sort_key
+        key = model.sort_key
         entries = model.entries
         order_idx = list(range(len(entries)))
         sec = self.secondary_col

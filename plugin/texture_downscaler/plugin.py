@@ -10,6 +10,7 @@ from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QMessageBox
 
 from .core.downscaler import TEXCONV_PATH, default_workers
+from .core.nexus import NexusRef, game_domain, read_mo2_api_key
 from .core.output import Manifest, RunMode
 from .core.scanner import LooseModSource, TextureSource
 from .ui.main_dialog import MainDialog
@@ -22,6 +23,7 @@ class TextureDownscalerTool(mobase.IPluginTool):
         super().__init__()
         self._organizer: mobase.IOrganizer | None = None
         self._output_created = False
+        self._manual_api_key: str | None = None
 
     # ---- IPlugin ---------------------------------------------------------------------------
 
@@ -52,6 +54,12 @@ class TextureDownscalerTool(mobase.IPluginTool):
             mobase.PluginSetting("workers", "Parallel texconv processes (0 = automatic)", 0),
             mobase.PluginSetting("hidden_mods", "Mods hidden in the texture list (JSON list)", "[]"),
             mobase.PluginSetting("sort_state", "Table sort order (JSON)", "{}"),
+            mobase.PluginSetting("hidden_authors", "Authors hidden in the texture list (JSON list)", "[]"),
+            mobase.PluginSetting(
+                "nexus_api_key",
+                "Nexus API key for the Author column. Leave empty to use the key MO2 saved when you logged in to Nexus",
+                "",
+            ),
         ]
 
     def requirements(self):
@@ -87,8 +95,11 @@ class TextureDownscalerTool(mobase.IPluginTool):
         except (TypeError, ValueError):
             workers = 0
 
+        sources = self._collect_sources(output_name)
+        # Read on the main thread; the lookup thread must not call into MO2.
+        self._manual_api_key = str(org.pluginSetting(self.name(), "nexus_api_key") or "").strip() or None
         dialog = MainDialog(
-            sources=self._collect_sources(output_name),
+            sources=sources,
             output_dir=output_dir,
             output_name=output_name,
             mode=mode,
@@ -100,6 +111,13 @@ class TextureDownscalerTool(mobase.IPluginTool):
             header_cache_path=self._cache_path(),
             sort_state=self._load_json_setting("sort_state", dict),
             on_sort_changed=lambda state: self._save_json_setting("sort_state", state),
+            mod_refs=self._nexus_refs([s.name for s in sources]),
+            author_cache_path=self._cache_path().with_name("nexus_authors.json"),
+            api_key_provider=self._api_key,
+            hidden_authors=set(self._load_json_setting("hidden_authors", list)),
+            on_hidden_authors_changed=lambda authors: self._save_json_setting(
+                "hidden_authors", sorted(authors, key=str.lower)
+            ),
             parent=parent,
         )
         dialog.exec()
@@ -175,6 +193,40 @@ class TextureDownscalerTool(mobase.IPluginTool):
                 continue
             sources.append(LooseModSource(name, Path(mod.absolutePath())))
         return sources
+
+    def _nexus_refs(self, mod_names: list[str]) -> dict[str, NexusRef | None]:
+        """Mod name -> Nexus mod page (game domain + mod id), or None when it isn't a Nexus mod."""
+        mod_list = self._organizer.modList()
+        domains: dict[str, str | None] = {}
+        refs: dict[str, NexusRef | None] = {}
+        for name in mod_names:
+            ref = None
+            try:
+                mod = mod_list.getMod(name)
+                mod_id = int(mod.nexusId()) if mod is not None else 0
+                if mod_id > 0:
+                    game = mod.gameName()
+                    if game not in domains:
+                        domains[game] = self._game_domain(game)
+                    if domains[game]:
+                        ref = NexusRef(domains[game], mod_id)
+            except Exception:
+                ref = None
+            refs[name] = ref
+        return refs
+
+    def _game_domain(self, game_name: str) -> str | None:
+        try:
+            game = self._organizer.getGame(game_name)
+            if game is not None and game.gameNexusName():
+                return game.gameNexusName()
+        except Exception:
+            pass
+        return game_domain(game_name)
+
+    def _api_key(self) -> str | None:
+        """Called from the lookup thread. A key in the plugin settings wins over MO2's stored key."""
+        return self._manual_api_key or read_mo2_api_key()
 
     def _ensure_output_mod(self, output_name: str) -> Path | None:
         """Return the output mod folder, creating the mod (enabled, last priority) if needed."""

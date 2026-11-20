@@ -6,7 +6,7 @@ import os
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
-from PyQt6.QtCore import QEvent, QItemSelection, QItemSelectionModel, QModelIndex, Qt
+from PyQt6.QtCore import QEvent, QItemSelection, QItemSelectionModel, QModelIndex, Qt, QTimer
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -34,10 +34,12 @@ from PyQt6.QtWidgets import (
 
 from ..core import output
 from ..core.downscaler import JobResult, estimated_size
+from ..core.nexus import UNKNOWN, AuthorCache, NexusRef
 from ..core.output import Manifest, RunMode
 from ..core.scanner import TextureEntry, TextureSource
 from ..core.texture_types import TextureType
 from .table_model import (
+    COL_AUTHOR,
     COL_MOD,
     COL_PATH,
     COL_RES,
@@ -52,7 +54,7 @@ from .table_model import (
     fmt_bytes,
     fmt_dim,
 )
-from .workers import DownscaleWorker, ScanWorker
+from .workers import AuthorWorker, DownscaleWorker, ScanWorker
 
 HIDE_SMALLER_CHOICES = [0, 512, 1024, 2048, 4096, 8192]
 DEFAULT_TYPE_LIMITS: dict[TextureType, int | None] = {t: None for t in TextureType}
@@ -105,6 +107,11 @@ class MainDialog(QDialog):
         header_cache_path: Path | None = None,
         sort_state: dict | None = None,
         on_sort_changed: Callable[[dict], None] | None = None,
+        mod_refs: dict[str, NexusRef | None] | None = None,
+        author_cache_path: Path | None = None,
+        api_key_provider: Callable[[], str | None] | None = None,
+        hidden_authors: Iterable[str] = (),
+        on_hidden_authors_changed: Callable[[set[str]], None] | None = None,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
@@ -124,6 +131,18 @@ class MainDialog(QDialog):
         self.on_sort_changed = on_sort_changed
         self._sort_state = dict(sort_state or {})
         self._initial_hidden_mods = set(hidden_mods)
+        self.hidden_authors: set[str] = set(hidden_authors)
+        self._saved_hidden_authors = set(hidden_authors)
+        self.on_hidden_authors_changed = on_hidden_authors_changed
+        self.mod_refs = mod_refs or {}
+        self.author_cache_path = author_cache_path
+        self.api_key_provider = api_key_provider
+        self.author_worker: AuthorWorker | None = None
+        self._pending_authors: dict[str, str] = {}
+        self._mods_by_ref: dict[str, list[str]] = {}
+        self._author_timer = QTimer(self)
+        self._author_timer.setInterval(1000)
+        self._author_timer.timeout.connect(self._flush_authors)
         self.manifest = Manifest.load(output_dir)
         self.scan_worker: ScanWorker | None = None
 
@@ -135,6 +154,7 @@ class MainDialog(QDialog):
 
         self._build_ui()
         self._start_scan()
+        self._start_author_lookup()
 
     # ================================================================================== UI ====
 
@@ -146,10 +166,13 @@ class MainDialog(QDialog):
         self.scan_label = QLabel("Scanning...")
         self.scan_bar = QProgressBar()
         self.scan_bar.setMaximumWidth(300)
+        self.author_label = QLabel()
+        self.author_label.setVisible(False)
         self.rescan_btn = QPushButton("Rescan")
         self.rescan_btn.clicked.connect(self._start_scan)
         status_row.addWidget(self.scan_label, 1)
         status_row.addWidget(self.scan_bar)
+        status_row.addWidget(self.author_label)
         status_row.addWidget(QLabel("Sort: click a column header, then by:"))
         self.secondary_combo = QComboBox()
         self.secondary_combo.addItem("(nothing)", None)
@@ -241,6 +264,7 @@ class MainDialog(QDialog):
         for col, width in (
             (COL_PATH, 480),
             (COL_MOD, 230),
+            (COL_AUTHOR, 130),
             (COL_TYPE, 120),
             (COL_RES, 100),
             (COL_STATUS, 150),
@@ -385,11 +409,9 @@ class MainDialog(QDialog):
     def _restore_sort(self) -> None:
         """Apply the sort saved from the last session (defaults: resolution, largest first)."""
         state = self._sort_state
-        n = len(HEADERS)
-        col = state.get("column")
-        col = col if isinstance(col, int) and 0 <= col < n else COL_RES
-        sec = state.get("secondary")
-        sec = sec if isinstance(sec, int) and 0 <= sec < n else None
+        # Columns are saved by name so adding columns doesn't scramble a saved sort.
+        col = HEADERS.index(state["column"]) if state.get("column") in HEADERS else COL_RES
+        sec = HEADERS.index(state["secondary"]) if state.get("secondary") in HEADERS else None
         self.secondary_combo.blockSignals(True)
         self.secondary_order.blockSignals(True)
         self.secondary_combo.setCurrentIndex(max(0, self.secondary_combo.findData(sec)))
@@ -404,10 +426,12 @@ class MainDialog(QDialog):
 
     def _save_sort(self, *_args) -> None:
         header = self.table.horizontalHeader()
+        col = header.sortIndicatorSection()
+        sec = self.secondary_combo.currentData()
         state = {
-            "column": header.sortIndicatorSection(),
+            "column": HEADERS[col] if 0 <= col < len(HEADERS) else None,
             "descending": header.sortIndicatorOrder() == Qt.SortOrder.DescendingOrder,
-            "secondary": self.secondary_combo.currentData(),
+            "secondary": HEADERS[sec] if sec is not None else None,
             "secondary_desc": self.secondary_order.isChecked(),
         }
         if state != self._sort_state:
@@ -498,6 +522,7 @@ class MainDialog(QDialog):
             min_dim=self.hide_combo.currentData() or 0,
             mod=self.mod_combo.currentData(),
             hidden_mods=frozenset(self.hidden_mods),
+            hidden_authors=frozenset(self.hidden_authors),
             ttype=self.type_combo.currentData(),
             text=self.search.text(),
             only_targeted=self.only_marked.isChecked(),
@@ -609,8 +634,18 @@ class MainDialog(QDialog):
             f'Hide mod "{selected_mods[0]}"' if len(selected_mods) == 1 else f"Hide {len(selected_mods)} mods"
         )
         menu.addAction(hide_label, lambda: self._hide_mods(selected_mods))
-        if self.hidden_mods:
-            menu.addAction(f"Unhide all mods ({len(self.hidden_mods)})", self._unhide_all_mods)
+        selected_authors = sorted(
+            {a for m in selected_mods if (a := self.model.mod_authors.get(m))}, key=str.lower
+        )
+        if selected_authors:
+            author_label = (
+                f'Hide author "{selected_authors[0]}"'
+                if len(selected_authors) == 1
+                else f"Hide {len(selected_authors)} authors"
+            )
+            menu.addAction(author_label, lambda: self._hide_authors(selected_authors))
+        if self.hidden_mods or self.hidden_authors:
+            menu.addAction(f"Unhide all ({self._hidden_summary()})", self._unhide_all_mods)
         menu.addAction(f'Show only mod "{entry.mod}"', lambda: self._filter_mod(entry.mod))
         folder = entry.virtual_path.rsplit("/", 1)[0] + "/"
         menu.addAction(f'Show only folder "{folder}"', lambda: self._filter_folder(folder))
@@ -653,19 +688,103 @@ class MainDialog(QDialog):
         self._update_unhide_button()
         self._apply_filters()
 
-    def _unhide_all_mods(self) -> None:
-        self.hidden_mods.clear()
+    def _hide_authors(self, authors: list[str]) -> None:
+        self.hidden_authors.update(authors)
         self._update_unhide_button()
         self._apply_filters()
+
+    def _unhide_all_mods(self) -> None:
+        """Unhide all hidden mods and authors."""
+        self.hidden_mods.clear()
+        self.hidden_authors.clear()
+        self._update_unhide_button()
+        self._apply_filters()
+
+    def _hidden_summary(self) -> str:
+        parts = []
+        if n := len(self.hidden_mods):
+            parts.append(f"{n} mod{'s' if n != 1 else ''}")
+        if n := len(self.hidden_authors):
+            parts.append(f"{n} author{'s' if n != 1 else ''}")
+        return ", ".join(parts)
 
     def _update_unhide_button(self) -> None:
         if self.on_hidden_mods_changed is not None and self.hidden_mods != self._initial_hidden_mods:
             self._initial_hidden_mods = set(self.hidden_mods)
             self.on_hidden_mods_changed(set(self.hidden_mods))
-        n = len(self.hidden_mods)
-        self.unhide_btn.setText(f"Unhide {n} mod{'s' if n != 1 else ''}")
-        self.unhide_btn.setToolTip("Hidden: " + ", ".join(sorted(self.hidden_mods, key=str.lower)))
-        self.unhide_btn.setVisible(n > 0)
+        if self.on_hidden_authors_changed is not None and self.hidden_authors != self._saved_hidden_authors:
+            self._saved_hidden_authors = set(self.hidden_authors)
+            self.on_hidden_authors_changed(set(self.hidden_authors))
+        self.unhide_btn.setText(f"Unhide {self._hidden_summary()}")
+        tooltip = []
+        if self.hidden_mods:
+            tooltip.append("Hidden mods: " + ", ".join(sorted(self.hidden_mods, key=str.lower)))
+        if self.hidden_authors:
+            tooltip.append("Hidden authors: " + ", ".join(sorted(self.hidden_authors, key=str.lower)))
+        self.unhide_btn.setToolTip("\n".join(tooltip))
+        self.unhide_btn.setVisible(bool(self.hidden_mods or self.hidden_authors))
+
+    # ============================================================================ authors ====
+
+    def _start_author_lookup(self) -> None:
+        """Fill the Author column from the cache, then look up the rest on Nexus in the background."""
+        cache = AuthorCache.load(self.author_cache_path) if self.author_cache_path else AuthorCache()
+        authors: dict[str, str] = {}
+        missing: list[NexusRef] = []
+        for mod, ref in self.mod_refs.items():
+            if ref is None:
+                authors[mod] = UNKNOWN
+                continue
+            self._mods_by_ref.setdefault(ref.key, []).append(mod)
+            cached = cache.get(ref)
+            if cached is None:
+                missing.append(ref)
+            else:
+                authors[mod] = cached or UNKNOWN
+        self.model.set_mod_authors(authors)
+        missing = list(dict.fromkeys(missing))
+        if not missing:
+            return
+        if self.api_key_provider is None:
+            self.model.set_mod_authors({m: UNKNOWN for r in missing for m in self._mods_by_ref[r.key]})
+            return
+
+        self.author_label.setText(f"Looking up {len(missing)} mod authors on Nexus...")
+        self.author_label.setVisible(True)
+        worker = AuthorWorker(missing, cache, self.api_key_provider, self)
+        worker.found.connect(self._on_author_found)
+        worker.progress.connect(
+            lambda n, total: self.author_label.setText(f"Looking up mod authors on Nexus: {n}/{total}")
+        )
+        worker.finished_msg.connect(self._on_authors_finished)
+        self._author_timer.start()
+        self.author_worker = worker
+        worker.start()
+
+    def _on_author_found(self, ref_key: str, author: str) -> None:
+        for mod in self._mods_by_ref.get(ref_key, []):
+            self._pending_authors[mod] = author or UNKNOWN
+
+    def _flush_authors(self) -> None:
+        """Apply looked-up authors in batches (re-filtering 60k rows per result would be slow)."""
+        if not self._pending_authors:
+            return
+        self.model.set_mod_authors(self._pending_authors)
+        self._pending_authors = {}
+        if self.hidden_authors or self.search.text():
+            self._apply_filters()
+
+    def _on_authors_finished(self, msg: str) -> None:
+        self._author_timer.stop()
+        self._flush_authors()
+        unresolved = {
+            m: UNKNOWN for mods in self._mods_by_ref.values() for m in mods if m not in self.model.mod_authors
+        }
+        if unresolved:
+            self.model.set_mod_authors(unresolved)
+        self.author_label.setText(msg.splitlines()[0] if msg else "")
+        self.author_label.setToolTip(msg)
+        self.author_label.setVisible(bool(msg))
 
     def _filter_folder(self, folder: str) -> None:
         self.search.setText(folder.lower())
@@ -786,4 +905,7 @@ class MainDialog(QDialog):
         if self.scan_worker is not None and self.scan_worker.isRunning():
             self.scan_worker.cancel = True
             self.scan_worker.wait(10000)
+        if self.author_worker is not None and self.author_worker.isRunning():
+            self.author_worker.cancel = True
+            self.author_worker.wait(20000)  # finishes the current request, then saves the cache
         super().done(result)

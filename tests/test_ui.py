@@ -380,7 +380,7 @@ def test_sort_is_restored_and_saved(app, tmp_path):
         workers=1,
         ensure_output_mod=lambda: None,
         on_output_written=lambda: None,
-        sort_state={"column": COL_SIZE, "descending": False, "secondary": COL_MOD, "secondary_desc": True},
+        sort_state={"column": "Size", "descending": False, "secondary": "Mod", "secondary_desc": True},
         on_sort_changed=saved.append,
     )
     _wait(app, lambda: dlg.run_btn.isEnabled())
@@ -391,7 +391,7 @@ def test_sort_is_restored_and_saved(app, tmp_path):
     assert saved == []  # restoring must not trigger a save
 
     dlg.table.sortByColumn(COL_PATH, Qt.SortOrder.DescendingOrder)
-    assert saved[-1] == {"column": COL_PATH, "descending": True, "secondary": COL_MOD, "secondary_desc": True}
+    assert saved[-1] == {"column": "Texture", "descending": True, "secondary": "Mod", "secondary_desc": True}
     dlg.secondary_combo.setCurrentIndex(0)
     assert saved[-1]["secondary"] is None
     dlg.done(0)
@@ -414,3 +414,102 @@ def test_scan_writes_header_cache(app, tmp_path):
     _wait(app, lambda: dlg.run_btn.isEnabled())
     assert cache.is_file() and len(dlg.model.entries) == 3
     dlg.done(0)
+
+
+def test_author_column_lookup_and_hide_author(app, tmp_path, monkeypatch):
+    from texture_downscaler.core import nexus
+    from texture_downscaler.core.nexus import AuthorCache, NexusRef
+    from texture_downscaler.ui.main_dialog import MainDialog
+    from texture_downscaler.ui.table_model import COL_AUTHOR, COL_MOD
+
+    def mod(name, w):
+        root = tmp_path / "mods" / name
+        write_fake_dds(root / "textures" / f"{name}.dds", w, w)
+        return LooseModSource(name, root)
+
+    sources = [mod("Cached", 2048), mod("Fetched", 2048), mod("Local", 2048), mod("Fetched Too", 1024)]
+    ref_cached = NexusRef("skyrimspecialedition", 1)
+    ref_fetched = NexusRef("skyrimspecialedition", 2)
+    cache_path = tmp_path / "authors.json"
+    seed = AuthorCache(cache_path)
+    seed.put(ref_cached, "Carol")
+    seed.save()
+
+    monkeypatch.setattr(nexus, "fetch_uploader", lambda ref, key: ("Fred", 1000))
+    monkeypatch.setattr(nexus.time, "sleep", lambda s: None)
+    saved_hidden = []
+    dlg = MainDialog(
+        sources=sources,
+        output_dir=tmp_path / "out",
+        output_name="Output",
+        mode=RunMode.SKIP_DONE,
+        workers=1,
+        ensure_output_mod=lambda: None,
+        on_output_written=lambda: None,
+        mod_refs={"Cached": ref_cached, "Fetched": ref_fetched, "Fetched Too": ref_fetched, "Local": None},
+        author_cache_path=cache_path,
+        api_key_provider=lambda: "secret",
+        on_hidden_authors_changed=saved_hidden.append,
+    )
+    _wait(app, lambda: dlg.run_btn.isEnabled())
+    _wait(app, lambda: not dlg.author_worker.isRunning())
+    app.processEvents()
+    dlg.hide_combo.setCurrentIndex(dlg.hide_combo.findData(0))
+
+    def authors():
+        return {
+            dlg.proxy.index(r, COL_MOD).data(): dlg.proxy.index(r, COL_AUTHOR).data()
+            for r in range(dlg.proxy.rowCount())
+        }
+
+    assert authors() == {"Cached": "Carol", "Fetched": "Fred", "Fetched Too": "Fred", "Local": "Unknown"}
+    assert AuthorCache.load(cache_path).get(ref_fetched) == "Fred"
+
+    dlg._hide_authors(["Fred"])
+    assert set(authors()) == {"Cached", "Local"}
+    assert saved_hidden == [{"Fred"}] and dlg.unhide_btn.text() == "Unhide 1 author"
+    dlg._hide_mods(["Local"])
+    assert dlg.unhide_btn.text() == "Unhide 1 mod, 1 author"
+    dlg.search.setText("carol")  # search also matches authors
+    assert set(authors()) == {"Cached"}
+    dlg.search.clear()
+    dlg._unhide_all_mods()
+    assert len(authors()) == 4 and saved_hidden[-1] == set()
+    dlg.done(0)
+
+
+def test_plugin_collects_nexus_refs(tmp_path, monkeypatch):
+    class Base:
+        def __init__(self):
+            pass
+
+    stub = types.SimpleNamespace(
+        IPluginTool=Base,
+        IOrganizer=object,
+        VersionInfo=lambda *a: a,
+        PluginSetting=lambda *a: a,
+        ModState=enum.IntFlag("ModState", {"ACTIVE": 2}),
+        GuessedString=str,
+    )
+    monkeypatch.setitem(sys.modules, "mobase", stub)
+    sys.modules.pop("texture_downscaler.plugin", None)
+    from texture_downscaler.core.nexus import NexusRef
+    from texture_downscaler.plugin import TextureDownscalerTool
+
+    def mod(mod_id, game="SkyrimSE"):
+        return types.SimpleNamespace(nexusId=lambda: mod_id, gameName=lambda: game)
+
+    mods = {"Nexus": mod(53000), "Manual": mod(0), "LE port": mod(12, "Skyrim"), "Broken": object()}
+    games = {"SkyrimSE": types.SimpleNamespace(gameNexusName=lambda: "skyrimspecialedition")}
+    org = types.SimpleNamespace(
+        modList=lambda: types.SimpleNamespace(getMod=mods.get),
+        getGame=lambda name: games.get(name),
+    )
+    plugin = TextureDownscalerTool()
+    plugin.init(org)
+    assert plugin._nexus_refs(list(mods)) == {
+        "Nexus": NexusRef("skyrimspecialedition", 53000),
+        "Manual": None,
+        "LE port": NexusRef("skyrim", 12),  # falls back to the built-in mapping
+        "Broken": None,
+    }

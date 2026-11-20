@@ -43,6 +43,7 @@ plugin/texture_downscaler/      # the MO2 plugin package (copied/linked into <MO
     dds.py                      # DDS header parsing (legacy FourCC + DX10), no pixel decoding
     texture_types.py            # classify by suffix: _n/_msn normal, _s/_m/_em spec, _g glow, ...
     scanner.py                  # TextureSource protocol, LooseModSource, scan() -> TextureEntry
+    nexus.py                    # Nexus uploader lookup + cache, MO2 API key from Credential Manager
     header_cache.py             # persistent DDS header cache (path + size + mtime)
     downscaler.py               # target size math, texconv command/job runner (thread pool)
     output.py                   # manifest (texture_downscaler.json in output mod), make_plan()
@@ -83,6 +84,17 @@ scripts/dev_link.ps1            # junction plugin into an MO2 install
   so deleted files drop out.
 - **Persisted UI state** (plugin settings, JSON): `hidden_mods`, `sort_state` (primary column and
   direction, secondary column and direction). Restoring state must not trigger a save.
+- **Author column** = the Nexus `uploaded_by` account name (agreed with the user, rather than the
+  free-text `author` field). MO2 doesn't store authors, so `core/nexus.py` looks them up via
+  `GET /v1/games/{domain}/mods/{id}.json` one at a time in `AuthorWorker` (about 0.2 s each).
+  - Results are cached permanently in `plugins/data/texture_downscaler/nexus_authors.json`;
+    `""` means looked up but not on Nexus.
+  - API key: the plugin setting `nexus_api_key` if set, otherwise MO2's own key read from Windows
+    Credential Manager (`ModOrganizer2_APIKEY`, UTF-16). Never log or store the key.
+  - Stops on 429, on 401/403, or when the hourly quota left drops below 50.
+  - Mods without a Nexus ID, or with a game domain that can't be resolved, show "Unknown".
+  - "Hide author" is saved in the plugin setting `hidden_authors`; search also matches authors.
+- Saved sort settings store column *names*, so adding columns doesn't scramble them.
 - MO2 API calls happen on the main thread. Scanning and texconv run in `QThread`s.
   texconv processes run in parallel (plugin setting `workers`, 0 = auto).
 
