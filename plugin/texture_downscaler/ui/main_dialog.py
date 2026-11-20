@@ -107,7 +107,7 @@ class MainDialog(QDialog):
         header_cache_path: Path | None = None,
         sort_state: dict | None = None,
         on_sort_changed: Callable[[dict], None] | None = None,
-        show_authors: bool = True,
+        auto_fetch_authors: bool = True,
         mod_refs: dict[str, NexusRef | None] | None = None,
         author_cache_path: Path | None = None,
         api_key_provider: Callable[[], str | None] | None = None,
@@ -138,7 +138,8 @@ class MainDialog(QDialog):
         self.mod_refs = mod_refs or {}
         self.author_cache_path = author_cache_path
         self.api_key_provider = api_key_provider
-        self.show_authors = show_authors
+        self.auto_fetch_authors = auto_fetch_authors
+        self._author_queue: list[NexusRef] = []
         self.author_worker: AuthorWorker | None = None
         self._pending_authors: dict[str, str] = {}
         self._mods_by_ref: dict[str, list[str]] = {}
@@ -156,10 +157,7 @@ class MainDialog(QDialog):
 
         self._build_ui()
         self._start_scan()
-        if show_authors:
-            self._start_author_lookup()
-        else:
-            self.table.setColumnHidden(COL_AUTHOR, True)
+        self._init_authors()
 
     # ================================================================================== UI ====
 
@@ -280,6 +278,8 @@ class MainDialog(QDialog):
         self.table.horizontalHeader().sortIndicatorChanged.connect(self._save_sort)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._context_menu)
+        self.table.horizontalHeader().setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.horizontalHeader().customContextMenuRequested.connect(self._header_context_menu)
         splitter.addWidget(self.table)
         splitter.addWidget(self._build_side_panel())
         self.table.selectionModel().selectionChanged.connect(self._update_selection_label)
@@ -640,7 +640,7 @@ class MainDialog(QDialog):
         )
         menu.addAction(hide_label, lambda: self._hide_mods(selected_mods))
         selected_authors = sorted(
-            {a for m in selected_mods if (a := self.model.mod_authors.get(m))}, key=str.lower
+            {self.model.mod_authors.get(m, UNKNOWN) for m in selected_mods}, key=str.lower
         )
         if selected_authors:
             author_label = (
@@ -651,6 +651,7 @@ class MainDialog(QDialog):
             menu.addAction(author_label, lambda: self._hide_authors(selected_authors))
         if self.hidden_mods or self.hidden_authors:
             menu.addAction(f"Unhide all ({self._hidden_summary()})", self._unhide_all_mods)
+        self._add_fetch_actions(menu, selected_mods)
         menu.addAction(f'Show only mod "{entry.mod}"', lambda: self._filter_mod(entry.mod))
         folder = entry.virtual_path.rsplit("/", 1)[0] + "/"
         menu.addAction(f'Show only folder "{folder}"', lambda: self._filter_folder(folder))
@@ -731,37 +732,89 @@ class MainDialog(QDialog):
 
     # ============================================================================ authors ====
 
-    def _start_author_lookup(self) -> None:
-        """Fill the Author column from the cache, then look up the rest on Nexus in the background."""
-        cache = AuthorCache.load(self.author_cache_path) if self.author_cache_path else AuthorCache()
+    def _header_context_menu(self, pos) -> None:
+        header = self.table.horizontalHeader()
+        if header.logicalIndexAt(pos) != COL_AUTHOR:
+            return
+        menu = QMenu(self)
+        self._add_fetch_actions(menu, [])
+        menu.exec(header.mapToGlobal(pos))
+
+    def _add_fetch_actions(self, menu: QMenu, selected_mods: list[str]) -> None:
+        """'Fetch author' entries; no-op entries are hidden rather than shown disabled."""
+        if self.api_key_provider is None or not self.mod_refs:
+            return
+        selected = self._unfetched_refs(selected_mods)
+        everything = self._unfetched_refs(None)
+        if not selected and not everything:
+            return
+        menu.addSeparator()
+        if selected:
+            n = len({m for m in selected_mods if self.mod_refs.get(m) in selected})
+            menu.addAction(
+                f"Fetch author for {n} selected mod{'s' if n != 1 else ''}",
+                lambda: self.fetch_authors(selected_mods),
+            )
+        if everything:
+            menu.addAction(
+                f"Fetch all mod authors ({len(everything)} remaining)", lambda: self.fetch_authors(None)
+            )
+
+    def _init_authors(self) -> None:
+        """Show cached authors; mods never looked up show "Unknown" until fetched."""
+        self._author_cache = (
+            AuthorCache.load(self.author_cache_path) if self.author_cache_path else AuthorCache()
+        )
         authors: dict[str, str] = {}
-        missing: list[NexusRef] = []
         for mod, ref in self.mod_refs.items():
             if ref is None:
                 authors[mod] = UNKNOWN
                 continue
             self._mods_by_ref.setdefault(ref.key, []).append(mod)
-            cached = cache.get(ref)
-            if cached is None:
-                missing.append(ref)
-            else:
+            cached = self._author_cache.get(ref)
+            if cached is not None:
                 authors[mod] = cached or UNKNOWN
         self.model.set_mod_authors(authors)
-        missing = list(dict.fromkeys(missing))
-        if not missing:
-            return
-        if self.api_key_provider is None:
-            self.model.set_mod_authors({m: UNKNOWN for r in missing for m in self._mods_by_ref[r.key]})
-            return
+        if self.auto_fetch_authors:
+            self.fetch_authors(None, quiet=True)
 
-        self.author_label.setText(f"Looking up {len(missing)} mod authors on Nexus...")
+    def _unfetched_refs(self, mods: list[str] | None) -> list[NexusRef]:
+        """Nexus pages (of `mods`, or of all mods) that aren't cached and aren't being fetched."""
+        names = self.mod_refs if mods is None else mods
+        queued = {r.key for r in self._author_queue}
+        refs = [
+            ref
+            for m in names
+            if (ref := self.mod_refs.get(m)) is not None
+            and self._author_cache.get(ref) is None
+            and ref.key not in queued
+            and m not in self.model.fetching_mods  # already being looked up
+        ]
+        return list(dict.fromkeys(refs))
+
+    def fetch_authors(self, mods: list[str] | None, quiet: bool = False) -> None:
+        """Look up uploaders on Nexus for `mods` (None = all mods) in the background."""
+        refs = self._unfetched_refs(mods)
+        if not refs or self.api_key_provider is None:
+            if not quiet:
+                self.author_label.setText("Authors: nothing left to look up.")
+                self.author_label.setVisible(True)
+            return
+        self._author_queue.extend(refs)
+        self.model.set_fetching({m for r in refs for m in self._mods_by_ref.get(r.key, [])}, True)
+        if self.author_worker is None or not self.author_worker.isRunning():
+            self._start_author_worker()
+
+    def _start_author_worker(self) -> None:
+        refs, self._author_queue = self._author_queue, []
+        self.author_label.setText(f"Looking up {len(refs)} mod authors on Nexus...")
         self.author_label.setVisible(True)
-        worker = AuthorWorker(missing, cache, self.api_key_provider, self)
+        worker = AuthorWorker(refs, self._author_cache, self.api_key_provider, self)
         worker.found.connect(self._on_author_found)
         worker.progress.connect(
             lambda n, total: self.author_label.setText(f"Looking up mod authors on Nexus: {n}/{total}")
         )
-        worker.finished_msg.connect(self._on_authors_finished)
+        worker.finished_msg.connect(lambda msg, refs=refs: self._on_authors_finished(msg, refs))
         self._author_timer.start()
         self.author_worker = worker
         worker.start()
@@ -779,17 +832,16 @@ class MainDialog(QDialog):
         if self.hidden_authors or self.search.text():
             self._apply_filters()
 
-    def _on_authors_finished(self, msg: str) -> None:
+    def _on_authors_finished(self, msg: str, refs: list[NexusRef]) -> None:
         self._author_timer.stop()
         self._flush_authors()
-        unresolved = {
-            m: UNKNOWN for mods in self._mods_by_ref.values() for m in mods if m not in self.model.mod_authors
-        }
-        if unresolved:
-            self.model.set_mod_authors(unresolved)
+        # Pages that weren't resolved (cancelled, rate limit, offline) go back to "Unknown".
+        self.model.set_fetching({m for r in refs for m in self._mods_by_ref.get(r.key, [])}, False)
         self.author_label.setText(msg.splitlines()[0] if msg else "")
         self.author_label.setToolTip(msg)
         self.author_label.setVisible(bool(msg))
+        if self._author_queue and not (self.author_worker and self.author_worker.cancel):
+            self._start_author_worker()
 
     def _filter_folder(self, folder: str) -> None:
         self.search.setText(folder.lower())

@@ -104,7 +104,7 @@ class TextureDownscalerTool(mobase.IPluginTool):
         # Read on the main thread; the lookup thread must not call into MO2.
         self._manual_api_key = str(org.pluginSetting(self.name(), "nexus_api_key") or "").strip() or None
         mod_refs = self._nexus_refs([s.name for s in sources])
-        show_authors = self._author_lookup_enabled(mod_refs)
+        auto_fetch_authors = self._author_lookup_enabled(mod_refs)
         dialog = MainDialog(
             sources=sources,
             output_dir=output_dir,
@@ -118,10 +118,10 @@ class TextureDownscalerTool(mobase.IPluginTool):
             header_cache_path=self._cache_path(),
             sort_state=self._load_json_setting("sort_state", dict),
             on_sort_changed=lambda state: self._save_json_setting("sort_state", state),
-            show_authors=show_authors,
-            mod_refs=mod_refs if show_authors else None,
+            auto_fetch_authors=auto_fetch_authors,
+            mod_refs=mod_refs,
             author_cache_path=self._cache_path().with_name("nexus_authors.json"),
-            api_key_provider=self._api_key if show_authors else None,
+            api_key_provider=self._api_key,
             hidden_authors=set(self._load_json_setting("hidden_authors", list)),
             on_hidden_authors_changed=lambda authors: self._save_json_setting(
                 "hidden_authors", sorted(authors, key=str.lower)
@@ -203,7 +203,10 @@ class TextureDownscalerTool(mobase.IPluginTool):
         return sources
 
     def _author_lookup_enabled(self, mod_refs: dict[str, NexusRef | None]) -> bool:
-        """Return whether to look up authors on Nexus, asking once if the user hasn't decided yet."""
+        """Return whether to look up authors automatically, asking once if the user hasn't decided yet.
+
+        Either way the user can fetch authors on demand from the table's context menu.
+        """
         setting = str(self._organizer.pluginSetting(self.name(), "author_lookup") or "ask").strip().lower()
         if setting in ("yes", "true", "1", "on"):
             return True
@@ -213,7 +216,7 @@ class TextureDownscalerTool(mobase.IPluginTool):
         answer = QMessageBox.question(
             self._parentWidget(),
             "Texture Downscaler - mod authors",
-            "Do you want to show the author of each mod?\n\n"
+            "Do you want to look up the author of each mod automatically?\n\n"
             "MO2 doesn't store mod authors, so the tool would look them up on Nexus Mods using the "
             f"API key MO2 already has: one request per mod page ({pages} for your enabled mods), "
             "done once in the background and then cached. Later, only newly installed mods are "
@@ -221,7 +224,9 @@ class TextureDownscalerTool(mobase.IPluginTool):
             "This shouldn't use any significant part of your Nexus API allowance: it is a small "
             "fraction of the hourly limit, and the lookup pauses by itself if the allowance gets low "
             "so MO2's update checks are not affected. Only Nexus mod IDs are sent.\n\n"
-            "You can change this later in MO2: Settings > Plugins > Texture Downscaler > author_lookup.",
+            "If you choose No, authors show as Unknown. You can still right-click any texture (or the "
+            "Author column header) and choose Fetch author / Fetch all mod authors at any time. To change "
+            "the automatic lookup later: MO2 Settings > Plugins > Texture Downscaler > author_lookup.",
         )
         enabled = answer == QMessageBox.StandardButton.Yes
         self._organizer.setPluginSetting(self.name(), "author_lookup", "yes" if enabled else "no")

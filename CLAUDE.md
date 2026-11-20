@@ -93,8 +93,10 @@ scripts/dev_link.ps1            # junction plugin into an MO2 install
     Credential Manager (`ModOrganizer2_APIKEY`, UTF-16). Never log or store the key.
   - Stops on 429, on 401/403, or when the hourly quota left drops below 50.
   - **Opt-in:** the plugin setting `author_lookup` (ask / yes / no) defaults to "ask". The first open
-    asks once, explaining that the API usage is minor, and saves the answer. With "no", nothing is
-    sent to Nexus and the Author column is hidden.
+    asks once and saves the answer. "yes" fetches missing authors automatically; "no" doesn't.
+    Either way the Author column stays visible: authors not looked up yet show "Unknown", and
+    right-click (rows or the Author header) offers "Fetch author for N selected mods" and
+    "Fetch all mod authors", so nobody is locked into their first answer.
   - Mods without a Nexus ID, or with a game domain that can't be resolved, show "Unknown".
   - "Hide author" is saved in the plugin setting `hidden_authors`; search also matches authors.
 - Saved sort settings store column *names*, so adding columns doesn't scramble them.

@@ -515,28 +515,68 @@ def test_plugin_collects_nexus_refs(tmp_path, monkeypatch):
     }
 
 
-def test_authors_disabled_hides_column_and_skips_lookup(app, tmp_path):
+def test_no_auto_fetch_shows_unknown_and_fetches_on_demand(app, tmp_path, monkeypatch):
+    from PyQt6.QtWidgets import QMenu
+
+    from texture_downscaler.core import nexus
     from texture_downscaler.core.nexus import NexusRef
     from texture_downscaler.ui.main_dialog import MainDialog
-    from texture_downscaler.ui.table_model import COL_AUTHOR
+    from texture_downscaler.ui.table_model import COL_AUTHOR, COL_MOD
 
-    def no_key_please():
-        raise AssertionError("must not look up authors when disabled")
+    def mod(name):
+        root = tmp_path / "mods" / name
+        write_fake_dds(root / "textures" / f"{name}.dds", 2048, 2048)
+        return LooseModSource(name, root)
 
+    fetched = []
+    monkeypatch.setattr(
+        nexus, "fetch_uploader", lambda ref, key: fetched.append(ref.mod_id) or (f"U{ref.mod_id}", 999)
+    )
+    monkeypatch.setattr(nexus.time, "sleep", lambda s: None)
+    refs = {"A": NexusRef("skyrimspecialedition", 1), "B": NexusRef("skyrimspecialedition", 2), "Local": None}
     dlg = MainDialog(
-        sources=_make_mods(tmp_path),
+        sources=[mod("A"), mod("B"), mod("Local")],
         output_dir=tmp_path / "out",
         output_name="Output",
         mode=RunMode.SKIP_DONE,
         workers=1,
         ensure_output_mod=lambda: None,
         on_output_written=lambda: None,
-        show_authors=False,
-        mod_refs={"Mod A": NexusRef("skyrimspecialedition", 1)},
-        api_key_provider=no_key_please,
+        auto_fetch_authors=False,
+        mod_refs=refs,
+        author_cache_path=tmp_path / "authors.json",
+        api_key_provider=lambda: "key",
     )
     _wait(app, lambda: dlg.run_btn.isEnabled())
-    assert dlg.table.isColumnHidden(COL_AUTHOR) and dlg.author_worker is None
+    dlg.hide_combo.setCurrentIndex(dlg.hide_combo.findData(0))
+
+    def authors():
+        return {
+            dlg.proxy.index(r, COL_MOD).data(): dlg.proxy.index(r, COL_AUTHOR).data()
+            for r in range(dlg.proxy.rowCount())
+        }
+
+    assert not dlg.table.isColumnHidden(COL_AUTHOR) and dlg.author_worker is None
+    assert authors() == {"A": "Unknown", "B": "Unknown", "Local": "Unknown"}
+
+    menu = QMenu()
+    dlg._add_fetch_actions(menu, ["A", "Local"])
+    labels = [a.text() for a in menu.actions() if not a.isSeparator()]
+    assert labels == ["Fetch author for 1 selected mod", "Fetch all mod authors (2 remaining)"]
+
+    dlg.fetch_authors(["A"])
+    assert authors()["A"] == "..."
+    _wait(app, lambda: not dlg.author_worker.isRunning())
+    app.processEvents()
+    assert fetched == [1] and authors() == {"A": "U1", "B": "Unknown", "Local": "Unknown"}
+
+    dlg.fetch_authors(None)
+    _wait(app, lambda: not dlg.author_worker.isRunning())
+    app.processEvents()
+    assert fetched == [1, 2] and authors()["B"] == "U2"
+    menu = QMenu()
+    dlg._add_fetch_actions(menu, ["A", "B"])
+    assert menu.actions() == []  # nothing left to fetch
     dlg.done(0)
 
 

@@ -56,7 +56,10 @@ class TextureTableModel(QAbstractTableModel):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.entries: list[TextureEntry] = []
-        self.mod_authors: dict[str, str] = {}  # mod name -> Nexus uploader (or "Unknown")
+        # mod name -> Nexus uploader, or UNKNOWN when it isn't a Nexus mod / not found.
+        # Mods missing here haven't been looked up yet (also shown as UNKNOWN).
+        self.mod_authors: dict[str, str] = {}
+        self.fetching_mods: set[str] = set()  # lookup queued or running -> shown as "..."
         self._bold = QFont()
         self._bold.setBold(True)
         self._target_brush = QBrush(QColor(70, 140, 255, 45))
@@ -98,10 +101,21 @@ class TextureTableModel(QAbstractTableModel):
         self.layoutChanged.emit()
 
     def author(self, e: TextureEntry) -> str:
-        return self.mod_authors.get(e.mod, "")
+        return self.mod_authors.get(e.mod, UNKNOWN)
 
     def set_mod_authors(self, authors: dict[str, str]) -> None:
         self.mod_authors.update(authors)
+        self.fetching_mods.difference_update(authors)
+        self.refresh_authors()
+
+    def set_fetching(self, mods: set[str], fetching: bool) -> None:
+        if fetching:
+            self.fetching_mods |= mods
+        else:
+            self.fetching_mods -= mods
+        self.refresh_authors()
+
+    def refresh_authors(self) -> None:
         if self.entries:
             self.dataChanged.emit(self.index(0, COL_AUTHOR), self.index(len(self.entries) - 1, COL_AUTHOR))
 
@@ -150,10 +164,13 @@ class TextureTableModel(QAbstractTableModel):
             if col == COL_MOD and e.provider_count > 1:
                 return f"Winning file. Provided by {e.provider_count} mods in total."
             if col == COL_AUTHOR:
-                author = self.author(e)
-                if not author:
+                if e.mod in self.fetching_mods:
                     return "Looking up the uploader on Nexus Mods..."
-                return "Nexus uploader" if author != UNKNOWN else "Not a Nexus mod, or not found on Nexus"
+                if e.mod not in self.mod_authors:
+                    return "Not looked up yet. Right-click > Fetch author to look it up on Nexus."
+                if self.mod_authors[e.mod] == UNKNOWN:
+                    return "Not a Nexus mod, or not found on Nexus"
+                return "Nexus uploader"
         if role == Qt.ItemDataRole.TextAlignmentRole and col in (COL_RES, COL_SIZE, COL_TARGET, COL_NEW):
             return int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         return None
@@ -170,7 +187,7 @@ class TextureTableModel(QAbstractTableModel):
         if col == COL_MOD:
             return e.mod
         if col == COL_AUTHOR:
-            return self.author(e) or "..."
+            return "..." if e.mod in self.fetching_mods else self.author(e)
         if col == COL_TYPE:
             return e.ttype.value
         if col == COL_RES:
