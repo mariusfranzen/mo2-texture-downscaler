@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import mobase
@@ -49,6 +50,7 @@ class TextureDownscalerTool(mobase.IPluginTool):
                 "output_mod_name", "Name of the mod that receives downscaled textures", DEFAULT_OUTPUT_NAME
             ),
             mobase.PluginSetting("workers", "Parallel texconv processes (0 = automatic)", 0),
+            mobase.PluginSetting("hidden_mods", "Mods hidden in the texture list (JSON list)", "[]"),
         ]
 
     def requirements(self):
@@ -92,11 +94,26 @@ class TextureDownscalerTool(mobase.IPluginTool):
             workers=workers or default_workers(),
             ensure_output_mod=lambda: self._ensure_output_mod(output_name),
             on_output_written=lambda: self._on_output_written(output_name),
+            hidden_mods=self._load_hidden_mods(),
+            on_hidden_mods_changed=self._save_hidden_mods,
             parent=parent,
         )
         dialog.exec()
 
     # ---- helpers ---------------------------------------------------------------------------
+
+    def _load_hidden_mods(self) -> set[str]:
+        raw = self._organizer.pluginSetting(self.name(), "hidden_mods")
+        try:
+            value = json.loads(str(raw or "[]"))
+        except ValueError:
+            return set()
+        return {str(m) for m in value} if isinstance(value, list) else set()
+
+    def _save_hidden_mods(self, mods: set[str]) -> None:
+        self._organizer.setPluginSetting(
+            self.name(), "hidden_mods", json.dumps(sorted(mods, key=str.lower), ensure_ascii=False)
+        )
 
     def _ask_run_mode(self, output_name: str, output_dir: Path) -> RunMode | None:
         manifest = Manifest.load(output_dir)

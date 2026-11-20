@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
-from PyQt6.QtCore import QModelIndex, Qt
+from PyQt6.QtCore import QItemSelection, QItemSelectionModel, QModelIndex, Qt
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -27,6 +27,7 @@ from PyQt6.QtWidgets import (
     QSplitter,
     QStyledItemDelegate,
     QTableView,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -98,6 +99,8 @@ class MainDialog(QDialog):
         workers: int,
         ensure_output_mod: Callable[[], Path | None],
         on_output_written: Callable[[], None],
+        hidden_mods: Iterable[str] = (),
+        on_hidden_mods_changed: Callable[[set[str]], None] | None = None,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
@@ -112,6 +115,8 @@ class MainDialog(QDialog):
         self.workers = workers
         self.ensure_output_mod = ensure_output_mod
         self.on_output_written = on_output_written
+        self.on_hidden_mods_changed = on_hidden_mods_changed
+        self._initial_hidden_mods = set(hidden_mods)
         self.manifest = Manifest.load(output_dir)
         self.scan_worker: ScanWorker | None = None
 
@@ -166,7 +171,7 @@ class MainDialog(QDialog):
             self.hide_combo.addItem("Show all sizes" if d == 0 else f"Hide smaller than {fmt_dim(d)}", d)
         self.hide_combo.setCurrentIndex(self.hide_combo.findData(2048))
         self.only_marked = QCheckBox("Only marked")
-        self.hidden_mods: set[str] = set()
+        self.hidden_mods: set[str] = set(self._initial_hidden_mods)
         self.unhide_btn = QPushButton()
         self.unhide_btn.setToolTip("Show all mods you hid via right-click again")
         self.unhide_btn.clicked.connect(self._unhide_all_mods)
@@ -186,6 +191,7 @@ class MainDialog(QDialog):
         for combo in (self.mod_combo, self.type_combo, self.hide_combo):
             combo.currentIndexChanged.connect(self._apply_filters)
         self.only_marked.toggled.connect(self._apply_filters)
+        self._update_unhide_button()
 
         # --- table + bulk panel
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -216,7 +222,9 @@ class MainDialog(QDialog):
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._context_menu)
         splitter.addWidget(self.table)
-        splitter.addWidget(self._build_bulk_panel())
+        splitter.addWidget(self._build_side_panel())
+        self.table.selectionModel().selectionChanged.connect(self._update_selection_label)
+        self.model.dataChanged.connect(self._update_selection_label)
         splitter.setStretchFactor(0, 1)
         splitter.setSizes([1150, 350])
         root.addWidget(splitter, 1)
@@ -235,14 +243,59 @@ class MainDialog(QDialog):
         bottom.addWidget(close_btn)
         root.addLayout(bottom)
 
-    def _build_bulk_panel(self) -> QWidget:
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(6, 0, 0, 0)
+    def _build_side_panel(self) -> QWidget:
+        tabs = QTabWidget()
+        tabs.addTab(self._build_basic_tab(), "Basic")
+        tabs.addTab(self._build_batch_tab(), "Batch")
+        tabs.setMinimumWidth(300)
+        return tabs
+
+    def _build_basic_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+
+        steps = QLabel(
+            "<b>1.</b> Select textures in the table (Ctrl / Shift-click, Ctrl+A for all shown).<br>"
+            "<b>2.</b> Choose a size and click <b>Mark selected</b>.<br>"
+            "<b>3.</b> Click <b>Downscale...</b> at the bottom to process every marked texture."
+        )
+        steps.setWordWrap(True)
+        layout.addWidget(steps)
+
+        box = QGroupBox("Selected textures")
+        bl = QVBoxLayout(box)
+        self.selection_label = QLabel("No textures selected.")
+        self.selection_label.setWordWrap(True)
+        bl.addWidget(self.selection_label)
+        form = QFormLayout()
+        self.sel_target = _size_combo(TARGET_CHOICES, default=2048)
+        form.addRow("Downscale to:", self.sel_target)
+        bl.addLayout(form)
+        mark_btn = QPushButton("Mark selected")
+        mark_btn.clicked.connect(lambda: self._set_selected(self.sel_target.currentData()))
+        bl.addWidget(mark_btn)
+        keep_btn = QPushButton("Unmark selected (keep original)")
+        keep_btn.clicked.connect(lambda: self._set_selected(None))
+        bl.addWidget(keep_btn)
+        layout.addWidget(box)
+
+        tip = QLabel(
+            "Tips: double-click a <i>Target</i> cell to set one texture. Right-click rows to hide a mod, "
+            "deselect a texture type, or filter to a mod/folder. Textures already at or below the "
+            "chosen size are left alone."
+        )
+        tip.setWordWrap(True)
+        layout.addWidget(tip)
+        layout.addStretch(1)
+        return page
+
+    def _build_batch_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
 
         hint = QLabel(
-            "Bulk actions apply to the textures <b>currently shown</b> by the filters. "
-            "Use the Mod / search filters to target a single mod or folder."
+            "Batch actions apply to <b>all textures currently shown</b> by the filters, not only the "
+            "selected ones. Use the Mod / Type / search filters or hide mods to narrow them down."
         )
         hint.setWordWrap(True)
         layout.addWidget(hint)
@@ -254,7 +307,7 @@ class MainDialog(QDialog):
         self.rule_target = _size_combo(TARGET_CHOICES, default=2048)
         rule.addRow("Textures larger than:", self.rule_above)
         rule.addRow("Downscale to:", self.rule_target)
-        btn = QPushButton("Apply to shown")
+        btn = QPushButton("Mark shown textures")
         btn.clicked.connect(self._apply_size_rule)
         rule.addRow(btn)
         layout.addWidget(rule_box)
@@ -267,34 +320,29 @@ class MainDialog(QDialog):
             combo = _size_combo(TARGET_CHOICES, none_label="No limit")
             self.type_limit_combos[t] = combo
             tf.addRow(f"{t.value}:", combo)
-        btn = QPushButton("Apply to shown")
+        btn = QPushButton("Mark shown textures")
         btn.clicked.connect(self._apply_type_limits)
         tf.addRow(btn)
         layout.addWidget(type_box)
 
-        # Selection
-        sel_box = QGroupBox("Selected rows")
-        sl = QVBoxLayout(sel_box)
-        row = QHBoxLayout()
-        self.sel_target = _size_combo(TARGET_CHOICES, default=2048)
-        set_btn = QPushButton("Set")
-        set_btn.clicked.connect(lambda: self._set_selected(self.sel_target.currentData()))
-        row.addWidget(self.sel_target, 1)
-        row.addWidget(set_btn)
-        sl.addLayout(row)
-        keep_btn = QPushButton("Keep original (clear target)")
-        keep_btn.clicked.connect(lambda: self._set_selected(None))
-        sl.addWidget(keep_btn)
-        tip = QLabel("Tip: double-click a Target cell, or right-click rows for more options.")
-        tip.setWordWrap(True)
-        sl.addWidget(tip)
-        layout.addWidget(sel_box)
-
-        clear_btn = QPushButton("Clear targets of all shown textures")
+        clear_btn = QPushButton("Unmark all shown textures")
         clear_btn.clicked.connect(lambda: self._set_rows(self._visible_rows(), None))
         layout.addWidget(clear_btn)
         layout.addStretch(1)
-        return panel
+        return page
+
+    def _update_selection_label(self, *_args) -> None:
+        rows = self._selected_rows()
+        if not rows:
+            self.selection_label.setText("No textures selected.")
+            return
+        entries = [self.model.entries[r] for r in rows]
+        mods = {e.mod for e in entries}
+        marked = sum(e.target is not None for e in entries)
+        self.selection_label.setText(
+            f"<b>{len(rows)}</b> selected from {len(mods)} mod{'s' if len(mods) != 1 else ''}"
+            f" ({marked} already marked), {fmt_bytes(sum(e.size for e in entries))}."
+        )
 
     # ============================================================================ scanning ====
 
@@ -434,6 +482,18 @@ class MainDialog(QDialog):
             act.triggered.connect(lambda _=False, c=c: self._set_selected(c))
             target_menu.addAction(act)
         menu.addAction("Keep original (clear target)", lambda: self._set_selected(None))
+        type_counts: dict[TextureType, int] = {}
+        for r in rows:
+            t = self.model.entries[r].ttype
+            type_counts[t] = type_counts.get(t, 0) + 1
+        if len(type_counts) > 1:
+            deselect_menu = menu.addMenu("Deselect by type")
+            only_menu = menu.addMenu("Keep only type selected")
+            for t in TextureType:
+                if t in type_counts:
+                    label = f"{t.value} ({type_counts[t]})"
+                    deselect_menu.addAction(label, lambda t=t: self._deselect_where(lambda e: e.ttype is t))
+                    only_menu.addAction(label, lambda t=t: self._deselect_where(lambda e: e.ttype is not t))
         menu.addSeparator()
 
         selected_mods = sorted({self.model.entries[r].mod for r in rows} | {entry.mod}, key=str.lower)
@@ -450,6 +510,28 @@ class MainDialog(QDialog):
         menu.addSeparator()
         menu.addAction("Open containing folder", lambda: os.startfile(entry.abs_path.parent))
         menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    def _deselect_where(self, predicate: Callable[[TextureEntry], bool]) -> None:
+        """Remove selected rows whose entry matches `predicate` from the table selection."""
+        sel_model = self.table.selectionModel()
+        last_col = self.proxy.columnCount() - 1
+        proxy_rows = sorted(
+            i.row()
+            for i in sel_model.selectedRows()
+            if predicate(self.model.entries[self.proxy.mapToSource(i).row()])
+        )
+        selection = QItemSelection()
+        start = prev = None
+        for row in [*proxy_rows, None]:  # merge contiguous rows into ranges
+            if row is not None and prev is not None and row == prev + 1:
+                prev = row
+                continue
+            if start is not None:
+                selection.select(self.proxy.index(start, 0), self.proxy.index(prev, last_col))
+            start = prev = row
+        sel_model.select(
+            selection, QItemSelectionModel.SelectionFlag.Deselect | QItemSelectionModel.SelectionFlag.Rows
+        )
 
     def _filter_mod(self, mod: str) -> None:
         self.mod_combo.setCurrentIndex(max(0, self.mod_combo.findData(mod)))
@@ -469,6 +551,9 @@ class MainDialog(QDialog):
         self._apply_filters()
 
     def _update_unhide_button(self) -> None:
+        if self.on_hidden_mods_changed is not None and self.hidden_mods != self._initial_hidden_mods:
+            self._initial_hidden_mods = set(self.hidden_mods)
+            self.on_hidden_mods_changed(set(self.hidden_mods))
         n = len(self.hidden_mods)
         self.unhide_btn.setText(f"Unhide {n} mod{'s' if n != 1 else ''}")
         self.unhide_btn.setToolTip("Hidden: " + ", ".join(sorted(self.hidden_mods, key=str.lower)))

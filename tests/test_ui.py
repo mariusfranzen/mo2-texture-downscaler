@@ -241,3 +241,52 @@ def test_new_output_mod_is_refreshed_then_activated(tmp_path, monkeypatch):
     calls.clear()
     plugin._on_output_written("Out")  # existing mod: cheap update only
     assert calls == ["changed"]
+
+
+def test_tabs_selection_label_and_deselect_by_type(app, tmp_path):
+    from PyQt6.QtWidgets import QTabWidget
+
+    dlg, _, _ = _dialog(app, tmp_path)
+    tabs = dlg.findChild(QTabWidget)
+    assert [tabs.tabText(i) for i in range(tabs.count())] == ["Basic", "Batch"]
+
+    dlg.hide_combo.setCurrentIndex(dlg.hide_combo.findData(0))
+    dlg.table.selectAll()
+    assert "<b>3</b> selected" in dlg.selection_label.text()
+
+    dlg._deselect_where(lambda e: e.ttype is TextureType.NORMAL)
+    keys = {dlg.model.entries[r].key for r in dlg._selected_rows()}
+    assert keys == {"textures/a/wall.dds", "textures/a/tiny.dds"}
+
+    dlg.table.selectAll()
+    dlg._deselect_where(lambda e: e.ttype is not TextureType.NORMAL)  # "keep only normals"
+    assert {dlg.model.entries[r].key for r in dlg._selected_rows()} == {"textures/a/wall_n.dds"}
+
+    dlg.sel_target.setCurrentIndex(dlg.sel_target.findData(64))
+    dlg._set_selected(64)
+    assert [e.key for e in dlg.model.entries if e.target] == ["textures/a/wall_n.dds"]
+    dlg.done(0)
+
+
+def test_hidden_mods_are_restored_and_saved(app, tmp_path):
+    from texture_downscaler.ui.main_dialog import MainDialog
+
+    saved = []
+    dlg = MainDialog(
+        sources=_make_mods(tmp_path),
+        output_dir=tmp_path / "out",
+        output_name="Output",
+        mode=RunMode.SKIP_DONE,
+        workers=1,
+        ensure_output_mod=lambda: None,
+        on_output_written=lambda: None,
+        hidden_mods={"Mod A"},
+        on_hidden_mods_changed=saved.append,
+    )
+    _wait(app, lambda: dlg.run_btn.isEnabled())
+    dlg.hide_combo.setCurrentIndex(dlg.hide_combo.findData(0))
+    assert dlg.proxy.rowCount() == 0 and dlg.unhide_btn.text() == "Unhide 1 mod"
+    assert saved == []  # restoring must not trigger a save
+    dlg._unhide_all_mods()
+    assert saved == [set()] and dlg.proxy.rowCount() == 3
+    dlg.done(0)

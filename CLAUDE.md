@@ -21,10 +21,16 @@ to what resolution. Output goes to a separate mod; original mod files are never 
   *Keep & skip already done* or *Rebuild from scratch* (or cancel).
 - **Encoder:** `texconv.exe` (Microsoft DirectXTex, MIT) is bundled in
   `plugin/texture_downscaler/bin/` with its license.
-- **Bulk selection tools:** size rule ("larger than X → Y"), max size per texture type, set/clear
-  target for selected rows, filter by mod / folder / search text / type, right-click "Hide mod"
-  (session only; hidden mods are untouched by bulk actions), and a
-  "hide textures smaller than N" filter. Bulk actions apply to the rows currently shown.
+- **Side panel has two tabs:**
+  - *Basic* acts on the **selected rows**: mark them with a size, or unmark them. It shows a step-by-step hint
+    (select → Mark selected → Downscale...) and a live selection summary.
+  - *Batch* acts on **all rows shown** by the filters: a size rule ("larger than X → Y"), max size per
+    texture type, and unmark all shown.
+- **Filters:** search text, mod, type, "hide smaller than N", only marked, and hidden mods.
+- **Right-click:** set or clear the target, *Deselect by type* / *Keep only type selected* (when the
+  selection mixes types), hide the mod(s) of the selected rows, show only this mod or folder, reset filters.
+- **Hidden mods are remembered** in the plugin setting `hidden_mods` (a JSON list). Hidden mods are
+  untouched by batch actions, but any targets they already have are kept.
 
 ## Layout
 
