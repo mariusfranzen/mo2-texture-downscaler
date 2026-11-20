@@ -32,8 +32,8 @@ Your original mods are never modified. The downscaled textures go into a separat
 
 ## Installation
 
-1. Download this repository (**Code → Download ZIP**) and extract it.
-2. Copy the folder `plugin/texture_downscaler` into your MO2 `plugins` folder, so that you end up with `<MO2>/plugins/texture_downscaler/__init__.py`.
+1. Download `texture_downscaler-x.y.z.zip` from the [latest release](https://github.com/mariusfranzen/mo2-texture-downscaler/releases/latest).
+2. Extract it into your MO2 `plugins` folder, so that you end up with `<MO2>/plugins/texture_downscaler/__init__.py`.
 3. Restart Mod Organizer 2.
 
 The tool appears under the **Tools** menu (puzzle-piece icon) as **Texture Downscaler**.

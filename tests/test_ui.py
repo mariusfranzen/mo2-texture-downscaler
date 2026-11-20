@@ -630,3 +630,30 @@ def test_author_lookup_prompt(app, monkeypatch, setting, answer, expected, saved
         assert "(1 for your enabled mods)" in asked[0] and "API allowance" in asked[0]
     else:
         assert asked == []
+
+
+def test_plugin_metadata_methods(monkeypatch):
+    """MO2 calls these on load; any NameError here means the plugin silently fails to load."""
+
+    class Base:
+        def __init__(self):
+            pass
+
+    stub = types.SimpleNamespace(
+        IPluginTool=Base,
+        IOrganizer=object,
+        VersionInfo=lambda *a: a,
+        PluginSetting=lambda *a: a,
+        ModState=enum.IntFlag("ModState", {"ACTIVE": 2}),
+        GuessedString=str,
+    )
+    monkeypatch.setitem(sys.modules, "mobase", stub)
+    sys.modules.pop("texture_downscaler.plugin", None)
+    import texture_downscaler
+    from texture_downscaler.plugin import TextureDownscalerTool
+
+    plugin = TextureDownscalerTool()
+    major, minor, patch = (int(x) for x in texture_downscaler.__version__.split("."))
+    assert plugin.version() == (major, minor, patch, 0)
+    for method in ("name", "author", "description", "displayName", "tooltip", "settings", "requirements"):
+        assert getattr(plugin, method)() is not None

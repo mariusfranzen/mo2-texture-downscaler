@@ -9,6 +9,7 @@ import mobase
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QMessageBox
 
+from . import __version__
 from .core.downscaler import TEXCONV_PATH, default_workers
 from .core.nexus import NexusRef, game_domain, read_mo2_api_key
 from .core.output import Manifest, RunMode
