@@ -127,6 +127,15 @@ python -m venv .venv
 powershell -File scripts\dev_link.ps1 -Mo2Path "C:\Path\To\MO2"
 ```
 
+### Making a release
+
+1. Bump `__version__` in `plugin/texture_downscaler/__init__.py` (MO2 reads the plugin version from it), then commit and push.
+2. Tag the commit and push the tag: `git tag -a v1.2.3 -m "Texture Downscaler 1.2.3"`, then `git push origin v1.2.3`.
+3. Build the ZIP: `powershell -File scripts\make_release.ps1`. It writes `dist\texture_downscaler-1.2.3.zip` and refuses to build if the tag doesn't contain the same version.
+4. Create a GitHub release for the tag and attach the ZIP.
+
+`scripts\make_release.ps1 -FromHead` builds a test ZIP from the current commit without needing a tag.
+
 Keep `core/` free of `mobase` and Qt imports. The code must stay compatible with Python 3.12, MO2's embedded interpreter.
 
 ## AI usage in development

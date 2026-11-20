@@ -54,6 +54,7 @@ plugin/texture_downscaler/      # the MO2 plugin package (copied/linked into <MO
   bin/texconv.exe, LICENSE-texconv.txt
 tests/                          # pytest; test_ui.py runs Qt offscreen with a stub `mobase`
 scripts/dev_link.ps1            # junction plugin into an MO2 install
+scripts/make_release.ps1        # build the release ZIP from tag v<__version__> (never tags/pushes)
 ```
 
 ## Key behaviours
@@ -118,6 +119,7 @@ python -m venv .venv && .venv\Scripts\pip install pytest ruff PyQt6   # dev setu
 .venv\Scripts\python -m pytest                                        # tests (incl. offscreen UI)
 .venv\Scripts\python -m ruff check . ; .venv\Scripts\python -m ruff format .
 powershell -File scripts\dev_link.ps1 -Mo2Path "<path to MO2>"       # link into MO2 (then restart MO2)
+powershell -File scripts\make_release.ps1                             # dist\texture_downscaler-<ver>.zip from tag v<ver>
 ```
 
 Manual testing happens in the user's own MO2 install (MO2 2.5.2, ~740 mods, ~60k winning textures;
