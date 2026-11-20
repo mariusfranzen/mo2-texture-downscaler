@@ -363,3 +363,54 @@ def test_secondary_sort(app, tmp_path):
     assert order()[0] == "textures/Alpha_1024.dds"
     assert order()[1:] == ["textures/Charlie_2048.dds", "textures/Bravo_2048.dds", "textures/Alpha_2048.dds"]
     dlg.done(0)
+
+
+def test_sort_is_restored_and_saved(app, tmp_path):
+    from PyQt6.QtCore import Qt
+
+    from texture_downscaler.ui.main_dialog import MainDialog
+    from texture_downscaler.ui.table_model import COL_MOD, COL_PATH, COL_SIZE
+
+    saved = []
+    dlg = MainDialog(
+        sources=_make_mods(tmp_path),
+        output_dir=tmp_path / "out",
+        output_name="Output",
+        mode=RunMode.SKIP_DONE,
+        workers=1,
+        ensure_output_mod=lambda: None,
+        on_output_written=lambda: None,
+        sort_state={"column": COL_SIZE, "descending": False, "secondary": COL_MOD, "secondary_desc": True},
+        on_sort_changed=saved.append,
+    )
+    _wait(app, lambda: dlg.run_btn.isEnabled())
+    header = dlg.table.horizontalHeader()
+    assert header.sortIndicatorSection() == COL_SIZE
+    assert header.sortIndicatorOrder() == Qt.SortOrder.AscendingOrder
+    assert dlg.secondary_combo.currentData() == COL_MOD and dlg.secondary_order.isChecked()
+    assert saved == []  # restoring must not trigger a save
+
+    dlg.table.sortByColumn(COL_PATH, Qt.SortOrder.DescendingOrder)
+    assert saved[-1] == {"column": COL_PATH, "descending": True, "secondary": COL_MOD, "secondary_desc": True}
+    dlg.secondary_combo.setCurrentIndex(0)
+    assert saved[-1]["secondary"] is None
+    dlg.done(0)
+
+
+def test_scan_writes_header_cache(app, tmp_path):
+    from texture_downscaler.ui.main_dialog import MainDialog
+
+    cache = tmp_path / "data" / "header_cache.json"
+    dlg = MainDialog(
+        sources=_make_mods(tmp_path),
+        output_dir=tmp_path / "out",
+        output_name="Output",
+        mode=RunMode.SKIP_DONE,
+        workers=1,
+        ensure_output_mod=lambda: None,
+        on_output_written=lambda: None,
+        header_cache_path=cache,
+    )
+    _wait(app, lambda: dlg.run_btn.isEnabled())
+    assert cache.is_file() and len(dlg.model.entries) == 3
+    dlg.done(0)

@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Protocol
 
 from .dds import DdsInfo, read_dds_info
+from .header_cache import HeaderCache
 from .texture_types import TextureType, classify
 
 ProgressFn = Callable[[int, int, str], None]  # (done, total, message)
@@ -101,11 +102,16 @@ def scan(
     sources: list[TextureSource],
     progress: ProgressFn | None = None,
     cancelled: CancelFn | None = None,
-    workers: int = 8,
+    workers: int = 16,
+    cache: HeaderCache | None = None,
 ) -> list[TextureEntry]:
-    """Scan sources (ascending priority) and return one entry per winning texture."""
+    """Scan sources (ascending priority) and return one entry per winning texture.
+
+    With a `cache`, unchanged files (same size + mtime) are not opened at all.
+    """
     progress = progress or (lambda *_: None)
     cancelled = cancelled or (lambda: False)
+    cache = cache or HeaderCache()
 
     winners: dict[str, tuple[str, SourceFile]] = {}
     counts: dict[str, int] = {}
@@ -118,17 +124,7 @@ def scan(
             winners[key] = (source.name, f)
             counts[key] = counts.get(key, 0) + 1
 
-    items = list(winners.items())
-    total = len(items)
-    entries: list[TextureEntry] = []
-
-    def read(item: tuple[str, tuple[str, SourceFile]]) -> TextureEntry | None:
-        if cancelled():
-            return None
-        key, (mod, f) = item
-        info = read_dds_info(f.abs_path)
-        if info is None:
-            return None
+    def make(key: str, mod: str, f: SourceFile, info: DdsInfo) -> TextureEntry:
         return TextureEntry(
             virtual_path=f.virtual_path,
             mod=mod,
@@ -140,14 +136,35 @@ def scan(
             provider_count=counts[key],
         )
 
-    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-        for n, entry in enumerate(pool.map(read, items), 1):
-            if entry is not None:
-                entries.append(entry)
-            if n % 500 == 0 or n == total:
-                progress(n, total, f"Reading texture headers ({n}/{total})")
-            if cancelled():
-                return []
+    entries: list[TextureEntry] = []
+    misses: list[tuple[str, str, SourceFile]] = []
+    for key, (mod, f) in winners.items():
+        info = cache.get(f.abs_path, f.size, f.mtime)
+        if info is None:
+            misses.append((key, mod, f))
+        else:
+            entries.append(make(key, mod, f, info))
+
+    def read(item: tuple[str, str, SourceFile]) -> TextureEntry | None:
+        if cancelled():
+            return None
+        key, mod, f = item
+        info = read_dds_info(f.abs_path)
+        if info is None:
+            return None
+        cache.put(f.abs_path, f.size, f.mtime, info)
+        return make(key, mod, f, info)
+
+    total = len(misses)
+    if total:
+        with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+            for n, entry in enumerate(pool.map(read, misses), 1):
+                if entry is not None:
+                    entries.append(entry)
+                if n % 500 == 0 or n == total:
+                    progress(n, total, f"Reading new/changed texture headers ({n}/{total})")
+                if cancelled():
+                    return []
 
     entries.sort(key=lambda e: (e.info.width * e.info.height, e.size), reverse=True)
     return entries

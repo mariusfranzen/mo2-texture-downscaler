@@ -43,6 +43,7 @@ plugin/texture_downscaler/      # the MO2 plugin package (copied/linked into <MO
     dds.py                      # DDS header parsing (legacy FourCC + DX10), no pixel decoding
     texture_types.py            # classify by suffix: _n/_msn normal, _s/_m/_em spec, _g glow, ...
     scanner.py                  # TextureSource protocol, LooseModSource, scan() -> TextureEntry
+    header_cache.py             # persistent DDS header cache (path + size + mtime)
     downscaler.py               # target size math, texconv command/job runner (thread pool)
     output.py                   # manifest (texture_downscaler.json in output mod), make_plan()
   ui/                           # PyQt6 only, no mobase
@@ -75,6 +76,13 @@ scripts/dev_link.ps1            # junction plugin into an MO2 install
   passes: secondary, then primary) and calls `TextureTableModel.reorder()`, which keeps
   selections. The proxy itself stays unsorted and only filters. Secondary sort: "Then by"
   dropdown or Ctrl+click on a header.
+- **Header cache** (`core/header_cache.py`): `<MO2>/plugins/data/texture_downscaler/header_cache.json`
+  (from `organizer.pluginDataPath()`), keyed by lowercase abs path + size + mtime. Size and mtime come
+  free from `os.scandir`, so unchanged files are never opened. Measured on the user's setup:
+  3.3 s → 0.9 s for 60k textures; the cache file is about 10 MB. Only entries used in a scan are saved,
+  so deleted files drop out.
+- **Persisted UI state** (plugin settings, JSON): `hidden_mods`, `sort_state` (primary column and
+  direction, secondary column and direction). Restoring state must not trigger a save.
 - MO2 API calls happen on the main thread. Scanning and texconv run in `QThread`s.
   texconv processes run in parallel (plugin setting `workers`, 0 = auto).
 

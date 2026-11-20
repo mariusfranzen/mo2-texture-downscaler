@@ -192,3 +192,50 @@ def test_source_changed_is_redone(tmp_path: Path):
     apply_manifest(entries, manifest, out)
     assert big.done_target is None and "changed" in big.status
     assert len(make_plan(entries, manifest, out, RunMode.SKIP_DONE).jobs) == 1
+
+
+# ------------------------------------------------------------------------- header cache ----
+
+
+def test_header_cache_skips_unchanged_files(tmp_path: Path, monkeypatch):
+    import os
+
+    from texture_downscaler.core import scanner
+    from texture_downscaler.core.header_cache import HeaderCache
+
+    mod = tmp_path / "M"
+    a = write_fake_dds(mod / "textures" / "a.dds", 2048, 2048, fourcc=b"DXT1")
+    write_fake_dds(mod / "textures" / "b.dds", 1024, 1024, fourcc=b"DXT1")
+    cache_file = tmp_path / "cache" / "headers.json"
+    sources = [LooseModSource("M", mod)]
+
+    cache = HeaderCache.load(cache_file)
+    assert len(scan(sources, cache=cache)) == 2 and cache.misses == 2
+    cache.save()
+
+    opened = []
+    real = scanner.read_dds_info
+    monkeypatch.setattr(scanner, "read_dds_info", lambda p: opened.append(p.name) or real(p))
+
+    cache = HeaderCache.load(cache_file)
+    entries = scan(sources, cache=cache)
+    assert opened == [] and cache.hits == 2
+    assert {e.key: e.info.width for e in entries} == {"textures/a.dds": 2048, "textures/b.dds": 1024}
+
+    # A changed file (new size/mtime) is re-read; a deleted one drops out of the saved cache.
+    write_fake_dds(a, 4096, 4096, mips=13, fourcc=b"DXT5")
+    os.utime(a, (1_000_000, 1_000_000))
+    (mod / "textures" / "b.dds").unlink()
+    cache = HeaderCache.load(cache_file)
+    entries = scan(sources, cache=cache)
+    assert opened == ["a.dds"] and entries[0].info.width == 4096
+    cache.save()
+    assert len(HeaderCache.load(cache_file)._old) == 1
+
+
+def test_header_cache_tolerates_garbage(tmp_path: Path):
+    from texture_downscaler.core.header_cache import HeaderCache
+
+    bad = tmp_path / "c.json"
+    bad.write_text("{not json", encoding="utf-8")
+    assert HeaderCache.load(bad).get(tmp_path / "x.dds", 1, 1.0) is None

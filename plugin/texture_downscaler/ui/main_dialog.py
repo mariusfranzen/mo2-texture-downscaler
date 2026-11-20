@@ -102,6 +102,9 @@ class MainDialog(QDialog):
         on_output_written: Callable[[], None],
         hidden_mods: Iterable[str] = (),
         on_hidden_mods_changed: Callable[[set[str]], None] | None = None,
+        header_cache_path: Path | None = None,
+        sort_state: dict | None = None,
+        on_sort_changed: Callable[[dict], None] | None = None,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
@@ -117,6 +120,9 @@ class MainDialog(QDialog):
         self.ensure_output_mod = ensure_output_mod
         self.on_output_written = on_output_written
         self.on_hidden_mods_changed = on_hidden_mods_changed
+        self.header_cache_path = header_cache_path
+        self.on_sort_changed = on_sort_changed
+        self._sort_state = dict(sort_state or {})
         self._initial_hidden_mods = set(hidden_mods)
         self.manifest = Manifest.load(output_dir)
         self.scan_worker: ScanWorker | None = None
@@ -240,9 +246,9 @@ class MainDialog(QDialog):
             (COL_STATUS, 150),
         ):
             self.table.setColumnWidth(col, width)
-        self.table.sortByColumn(COL_RES, Qt.SortOrder.DescendingOrder)
+        self._restore_sort()
         self.table.horizontalHeader().viewport().installEventFilter(self)
-        self._apply_secondary_sort()
+        self.table.horizontalHeader().sortIndicatorChanged.connect(self._save_sort)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._context_menu)
         splitter.addWidget(self.table)
@@ -374,6 +380,40 @@ class MainDialog(QDialog):
         desc = self.secondary_order.isChecked()
         self.secondary_order.setText("Descending ▼" if desc else "Ascending ▲")
         self.proxy.set_secondary_sort(self.secondary_combo.currentData(), desc)
+        self._save_sort()
+
+    def _restore_sort(self) -> None:
+        """Apply the sort saved from the last session (defaults: resolution, largest first)."""
+        state = self._sort_state
+        n = len(HEADERS)
+        col = state.get("column")
+        col = col if isinstance(col, int) and 0 <= col < n else COL_RES
+        sec = state.get("secondary")
+        sec = sec if isinstance(sec, int) and 0 <= sec < n else None
+        self.secondary_combo.blockSignals(True)
+        self.secondary_order.blockSignals(True)
+        self.secondary_combo.setCurrentIndex(max(0, self.secondary_combo.findData(sec)))
+        self.secondary_order.setChecked(bool(state.get("secondary_desc", False)))
+        self.secondary_combo.blockSignals(False)
+        self.secondary_order.blockSignals(False)
+        desc = self.secondary_order.isChecked()
+        self.secondary_order.setText("Descending ▼" if desc else "Ascending ▲")
+        self.proxy.secondary_col, self.proxy.secondary_desc = sec, desc
+        order = Qt.SortOrder.DescendingOrder if state.get("descending", True) else Qt.SortOrder.AscendingOrder
+        self.table.sortByColumn(col, order)
+
+    def _save_sort(self, *_args) -> None:
+        header = self.table.horizontalHeader()
+        state = {
+            "column": header.sortIndicatorSection(),
+            "descending": header.sortIndicatorOrder() == Qt.SortOrder.DescendingOrder,
+            "secondary": self.secondary_combo.currentData(),
+            "secondary_desc": self.secondary_order.isChecked(),
+        }
+        if state != self._sort_state:
+            self._sort_state = state
+            if self.on_sort_changed is not None:
+                self.on_sort_changed(dict(state))
 
     def set_secondary_column(self, col: int) -> None:
         """Ctrl+click on a header: make it the secondary sort, or flip its direction."""
@@ -408,7 +448,7 @@ class MainDialog(QDialog):
         self.scan_bar.setRange(0, 0)
         self.scan_label.setText(f"Scanning {len(self.sources)} enabled mods...")
         self.model.set_entries([])
-        worker = ScanWorker(self.sources, self)
+        worker = ScanWorker(self.sources, self.header_cache_path, self)
         worker.progress.connect(self._on_scan_progress)
         worker.done.connect(self._on_scan_done)
         worker.failed.connect(self._on_scan_failed)

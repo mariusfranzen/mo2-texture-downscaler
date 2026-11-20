@@ -51,6 +51,7 @@ class TextureDownscalerTool(mobase.IPluginTool):
             ),
             mobase.PluginSetting("workers", "Parallel texconv processes (0 = automatic)", 0),
             mobase.PluginSetting("hidden_mods", "Mods hidden in the texture list (JSON list)", "[]"),
+            mobase.PluginSetting("sort_state", "Table sort order (JSON)", "{}"),
         ]
 
     def requirements(self):
@@ -96,11 +97,31 @@ class TextureDownscalerTool(mobase.IPluginTool):
             on_output_written=lambda: self._on_output_written(output_name),
             hidden_mods=self._load_hidden_mods(),
             on_hidden_mods_changed=self._save_hidden_mods,
+            header_cache_path=self._cache_path(),
+            sort_state=self._load_json_setting("sort_state", dict),
+            on_sort_changed=lambda state: self._save_json_setting("sort_state", state),
             parent=parent,
         )
         dialog.exec()
 
     # ---- helpers ---------------------------------------------------------------------------
+
+    def _cache_path(self) -> Path:
+        try:
+            base = Path(self._organizer.pluginDataPath())
+        except Exception:
+            base = Path(self._organizer.basePath()) / "plugins" / "data"
+        return base / "texture_downscaler" / "header_cache.json"
+
+    def _load_json_setting(self, key: str, expected: type):
+        try:
+            value = json.loads(str(self._organizer.pluginSetting(self.name(), key) or ""))
+        except ValueError:
+            return expected()
+        return value if isinstance(value, expected) else expected()
+
+    def _save_json_setting(self, key: str, value) -> None:
+        self._organizer.setPluginSetting(self.name(), key, json.dumps(value, ensure_ascii=False))
 
     def _load_hidden_mods(self) -> set[str]:
         raw = self._organizer.pluginSetting(self.name(), "hidden_mods")

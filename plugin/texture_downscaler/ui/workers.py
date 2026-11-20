@@ -9,6 +9,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 
 from ..core import output
 from ..core.downscaler import JobResult, run_jobs
+from ..core.header_cache import HeaderCache
 from ..core.output import Manifest, Plan
 from ..core.scanner import TextureEntry, TextureSource, scan
 
@@ -18,14 +19,18 @@ class ScanWorker(QThread):
     done = pyqtSignal(list)  # list[TextureEntry]
     failed = pyqtSignal(str)
 
-    def __init__(self, sources: list[TextureSource], parent=None):
+    def __init__(self, sources: list[TextureSource], cache_path: Path | None = None, parent=None):
         super().__init__(parent)
         self.sources = sources
+        self.cache_path = cache_path
         self.cancel = False
 
     def run(self):
         try:
-            entries = scan(self.sources, self.progress.emit, lambda: self.cancel)
+            cache = HeaderCache.load(self.cache_path) if self.cache_path else HeaderCache()
+            entries = scan(self.sources, self.progress.emit, lambda: self.cancel, cache=cache)
+            if not self.cancel:
+                cache.save()
         except Exception:
             self.failed.emit(traceback.format_exc())
             return
