@@ -9,7 +9,6 @@ from ..core.downscaler import estimated_size, target_size
 from ..core.scanner import TextureEntry
 from ..core.texture_types import TextureType
 
-SORT_ROLE = Qt.ItemDataRole.UserRole + 1
 ENTRY_ROLE = Qt.ItemDataRole.UserRole + 2
 
 TARGET_CHOICES: list[int] = [8192, 4096, 2048, 1024, 512, 256, 128]
@@ -61,6 +60,19 @@ class TextureTableModel(QAbstractTableModel):
             self.dataChanged.emit(self.index(min(rows), 0), self.index(max(rows), len(HEADERS) - 1))
         return changed
 
+    def reorder(self, order: list[int]) -> None:
+        """Rearrange rows so new row i is old row order[i], keeping selections/persistent indexes."""
+        self.layoutAboutToBeChanged.emit()
+        new_pos = [0] * len(order)
+        for new, old in enumerate(order):
+            new_pos[old] = new
+        self.entries = [self.entries[i] for i in order]
+        old_indexes = self.persistentIndexList()
+        self.changePersistentIndexList(
+            old_indexes, [self.index(new_pos[i.row()], i.column()) for i in old_indexes]
+        )
+        self.layoutChanged.emit()
+
     def refresh_rows(self) -> None:
         if self.entries:
             self.dataChanged.emit(self.index(0, 0), self.index(len(self.entries) - 1, len(HEADERS) - 1))
@@ -92,8 +104,6 @@ class TextureTableModel(QAbstractTableModel):
 
         if role == Qt.ItemDataRole.DisplayRole:
             return self._display(e, col)
-        if role == SORT_ROLE:
-            return self._sort_key(e, col)
         if role == ENTRY_ROLE:
             return e
         if role == Qt.ItemDataRole.EditRole and col == COL_TARGET:
@@ -145,7 +155,7 @@ class TextureTableModel(QAbstractTableModel):
     @staticmethod
     def _sort_key(e: TextureEntry, col: int):
         if col == COL_RES:
-            return (e.info.width * e.info.height, e.size)
+            return e.info.width * e.info.height
         if col == COL_SIZE:
             return e.size
         if col == COL_TARGET:
@@ -165,7 +175,10 @@ class TextureFilterProxy(QSortFilterProxyModel):
         self.text_terms: list[str] = []
         self.only_targeted = False
         self.hide_done = False
-        self.setSortRole(SORT_ROLE)
+        self.secondary_col: int | None = None
+        self.secondary_desc = False
+        self.sort_col = -1
+        self.sort_order = Qt.SortOrder.AscendingOrder
         self.setDynamicSortFilter(False)
 
     def set_filters(
@@ -209,5 +222,42 @@ class TextureFilterProxy(QSortFilterProxyModel):
                 return False
         return True
 
-    def lessThan(self, left, right):
-        return left.data(SORT_ROLE) < right.data(SORT_ROLE)
+    def set_secondary_sort(self, col: int | None, descending: bool) -> None:
+        self.secondary_col = col
+        self.secondary_desc = descending
+        if self.sort_col >= 0:
+            self.sort(self.sort_col, self.sort_order)
+        self.headerDataChanged.emit(Qt.Orientation.Horizontal, 0, len(HEADERS) - 1)
+
+    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
+        text = super().headerData(section, orientation, role)
+        if (
+            role == Qt.ItemDataRole.DisplayRole
+            and orientation == Qt.Orientation.Horizontal
+            and section == self.secondary_col
+            and section != self.sort_col
+        ):
+            return f"{text}  (2{'▼' if self.secondary_desc else '▲'})"
+        return text
+
+    def sort(self, column, order=Qt.SortOrder.AscendingOrder):
+        """Sort by reordering the source model in Python instead of Qt's sort.
+
+        Qt's proxy sort calls lessThan ~1M times for 60k rows; every call crosses into Python,
+        which takes seconds. Sorting the list in Python takes ~0.1 s, and the proxy (left
+        unsorted) then just keeps source order for the filtered rows.
+        """
+        self.sort_col, self.sort_order = column, order
+        model: TextureTableModel = self.sourceModel()
+        if column < 0 or not model.entries:
+            return
+        key = TextureTableModel._sort_key
+        entries = model.entries
+        order_idx = list(range(len(entries)))
+        sec = self.secondary_col
+        if sec is not None and sec != column:  # stable sorts: secondary first, then primary
+            sec_keys = [key(e, sec) for e in entries]
+            order_idx.sort(key=sec_keys.__getitem__, reverse=self.secondary_desc)
+        primary = [key(e, column) for e in entries]
+        order_idx.sort(key=primary.__getitem__, reverse=order == Qt.SortOrder.DescendingOrder)
+        model.reorder(order_idx)

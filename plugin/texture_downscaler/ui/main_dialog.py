@@ -6,7 +6,7 @@ import os
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
-from PyQt6.QtCore import QItemSelection, QItemSelectionModel, QModelIndex, Qt
+from PyQt6.QtCore import QEvent, QItemSelection, QItemSelectionModel, QModelIndex, Qt
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -45,6 +45,7 @@ from .table_model import (
     COL_TARGET,
     COL_TYPE,
     ENTRY_ROLE,
+    HEADERS,
     TARGET_CHOICES,
     TextureFilterProxy,
     TextureTableModel,
@@ -143,6 +144,20 @@ class MainDialog(QDialog):
         self.rescan_btn.clicked.connect(self._start_scan)
         status_row.addWidget(self.scan_label, 1)
         status_row.addWidget(self.scan_bar)
+        status_row.addWidget(QLabel("Sort: click a column header, then by:"))
+        self.secondary_combo = QComboBox()
+        self.secondary_combo.addItem("(nothing)", None)
+        for col, name in enumerate(HEADERS):
+            self.secondary_combo.addItem(name, col)
+        self.secondary_combo.setToolTip("Secondary sort column. Tip: Ctrl+click a column header to set it.")
+        self.secondary_order = QPushButton()
+        self.secondary_order.setCheckable(True)
+        self.secondary_order.setFixedWidth(110)
+        self.secondary_order.setToolTip("Direction of the secondary sort")
+        self.secondary_combo.currentIndexChanged.connect(self._apply_secondary_sort)
+        self.secondary_order.toggled.connect(self._apply_secondary_sort)
+        status_row.addWidget(self.secondary_combo)
+        status_row.addWidget(self.secondary_order)
         status_row.addWidget(self.rescan_btn)
         root.addLayout(status_row)
 
@@ -226,6 +241,8 @@ class MainDialog(QDialog):
         ):
             self.table.setColumnWidth(col, width)
         self.table.sortByColumn(COL_RES, Qt.SortOrder.DescendingOrder)
+        self.table.horizontalHeader().viewport().installEventFilter(self)
+        self._apply_secondary_sort()
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._context_menu)
         splitter.addWidget(self.table)
@@ -350,6 +367,35 @@ class MainDialog(QDialog):
             f"<b>{len(rows)}</b> selected from {len(mods)} mod{'s' if len(mods) != 1 else ''}"
             f" ({marked} already marked), {fmt_bytes(sum(e.size for e in entries))}."
         )
+
+    # ============================================================================= sorting ====
+
+    def _apply_secondary_sort(self, *_args) -> None:
+        desc = self.secondary_order.isChecked()
+        self.secondary_order.setText("Descending ▼" if desc else "Ascending ▲")
+        self.proxy.set_secondary_sort(self.secondary_combo.currentData(), desc)
+
+    def set_secondary_column(self, col: int) -> None:
+        """Ctrl+click on a header: make it the secondary sort, or flip its direction."""
+        if self.secondary_combo.currentData() == col:
+            self.secondary_order.toggle()
+        else:
+            self.secondary_combo.setCurrentIndex(self.secondary_combo.findData(col))
+
+    def eventFilter(self, obj, event) -> bool:
+        header = self.table.horizontalHeader()
+        if (
+            obj is header.viewport()
+            and event.type() in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease)
+            and event.button() == Qt.MouseButton.LeftButton
+            and event.modifiers() & Qt.KeyboardModifier.ControlModifier
+        ):
+            if event.type() == QEvent.Type.MouseButtonRelease:
+                col = header.logicalIndexAt(event.position().toPoint())
+                if col >= 0:
+                    self.set_secondary_column(col)
+            return True  # swallow so the primary sort doesn't change
+        return super().eventFilter(obj, event)
 
     # ============================================================================ scanning ====
 

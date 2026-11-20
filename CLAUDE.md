@@ -70,6 +70,11 @@ scripts/dev_link.ps1            # junction plugin into an MO2 install
   Only files listed in the manifest are ever deleted.
 - A newly created output mod only appears in MO2 after `organizer.refresh()`; enabling and
   moving it to the bottom is done in an `onNextRefresh` callback (before that, MO2 ignores it).
+- **Sorting** never uses Qt's proxy sort (one Python `lessThan` callback per comparison took
+  ~2.5 s for 60k rows). `TextureFilterProxy.sort()` sorts the source list in Python (two stable
+  passes: secondary, then primary) and calls `TextureTableModel.reorder()`, which keeps
+  selections. The proxy itself stays unsorted and only filters. Secondary sort: "Then by"
+  dropdown or Ctrl+click on a header.
 - MO2 API calls happen on the main thread. Scanning and texconv run in `QThread`s.
   texconv processes run in parallel (plugin setting `workers`, 0 = auto).
 

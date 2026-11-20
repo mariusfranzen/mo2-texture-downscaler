@@ -318,3 +318,48 @@ def test_summary_and_run_button_wording(app, tmp_path):
     assert dlg.run_btn.text() == "Downscale 1 marked texture..."
     assert "VRAM if all loaded" in dlg.summary.text() and "on disk" in dlg.summary.text()
     dlg.done(0)
+
+
+def test_secondary_sort(app, tmp_path):
+    from PyQt6.QtCore import Qt
+
+    from texture_downscaler.ui.main_dialog import MainDialog
+    from texture_downscaler.ui.table_model import COL_MOD, COL_PATH, COL_RES
+
+    sources = []
+    for mod, size in (("Bravo", 2048), ("Alpha", 1024), ("Charlie", 2048), ("Alpha", 2048)):
+        root = tmp_path / "mods" / mod
+        write_fake_dds(root / "textures" / f"{mod}_{size}.dds", size, size)
+        sources.append(LooseModSource(mod, root))
+    dlg = MainDialog(
+        sources=sources,
+        output_dir=tmp_path / "out",
+        output_name="Output",
+        mode=RunMode.SKIP_DONE,
+        workers=1,
+        ensure_output_mod=lambda: None,
+        on_output_written=lambda: None,
+    )
+    _wait(app, lambda: dlg.run_btn.isEnabled())
+    dlg.hide_combo.setCurrentIndex(dlg.hide_combo.findData(0))
+
+    def order():
+        return [dlg.proxy.index(r, COL_PATH).data() for r in range(dlg.proxy.rowCount())]
+
+    dlg.table.sortByColumn(COL_RES, Qt.SortOrder.DescendingOrder)
+    dlg.set_secondary_column(COL_MOD)  # like Ctrl+click on the Mod header
+    assert order() == [
+        "textures/Alpha_2048.dds",
+        "textures/Bravo_2048.dds",
+        "textures/Charlie_2048.dds",
+        "textures/Alpha_1024.dds",
+    ]
+    assert dlg.proxy.headerData(COL_MOD, Qt.Orientation.Horizontal).endswith("(2\u25b2)")
+
+    dlg.set_secondary_column(COL_MOD)  # second Ctrl+click flips direction
+    assert order()[:3] == ["textures/Charlie_2048.dds", "textures/Bravo_2048.dds", "textures/Alpha_2048.dds"]
+
+    dlg.table.sortByColumn(COL_RES, Qt.SortOrder.AscendingOrder)
+    assert order()[0] == "textures/Alpha_1024.dds"
+    assert order()[1:] == ["textures/Charlie_2048.dds", "textures/Bravo_2048.dds", "textures/Alpha_2048.dds"]
+    dlg.done(0)
