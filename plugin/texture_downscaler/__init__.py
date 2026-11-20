@@ -1,0 +1,10 @@
+"""Texture Downscaler - a Mod Organizer 2 tool plugin.
+
+Copy (or link) this folder into MO2's `plugins` directory.
+"""
+
+
+def createPlugin():
+    from .plugin import TextureDownscalerTool
+
+    return TextureDownscalerTool()

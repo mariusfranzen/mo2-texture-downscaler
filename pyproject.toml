@@ -1,0 +1,19 @@
+[project]
+name = "skyrim-texture-downscaler"
+version = "0.1.0"
+description = "Mod Organizer 2 tool plugin that finds and downscales high-resolution Skyrim textures"
+requires-python = ">=3.12"
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"  # MO2 2.5 embeds Python 3.12
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501", "B008"]  # long UI strings; QModelIndex() default is the Qt idiom
+
+[tool.ruff.lint.isort]
+known-first-party = ["texture_downscaler", "helpers"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
