@@ -112,8 +112,8 @@ scripts/dev_link.ps1            # junction plugin into an MO2 install
 python -m venv .venv && .venv\Scripts\pip install pytest ruff PyQt6   # dev setup
 .venv\Scripts\python -m pytest                                        # tests (incl. offscreen UI)
 .venv\Scripts\python -m ruff check . ; .venv\Scripts\python -m ruff format .
-powershell -File scripts\dev_link.ps1                                 # link into MO2 (then restart MO2)
+powershell -File scripts\dev_link.ps1 -Mo2Path "<path to MO2>"       # link into MO2 (then restart MO2)
 ```
 
-The user's MO2 install for manual testing: `D:\D Games\SkyrimStuff\mo2` (MO2 2.5.2, ~740 mods,
-~60k winning textures; a full header scan takes ~6 s).
+Manual testing happens in the user's own MO2 install (MO2 2.5.2, ~740 mods, ~60k winning textures;
+an uncached header scan takes ~3-6 s).

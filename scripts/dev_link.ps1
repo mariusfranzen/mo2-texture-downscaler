@@ -1,6 +1,6 @@
 # Link the plugin folder into an MO2 install (directory junction, no admin rights needed).
-# Usage: .\scripts\dev_link.ps1 [-Mo2Path "D:\D Games\SkyrimStuff\mo2"]
-param([string]$Mo2Path = "D:\D Games\SkyrimStuff\mo2")
+# Usage: .\scripts\dev_link.ps1 -Mo2Path "C:\Path\To\MO2"
+param([Parameter(Mandatory = $true)][string]$Mo2Path)
 
 $source = Join-Path $PSScriptRoot "..\plugin\texture_downscaler" | Resolve-Path
 $target = Join-Path $Mo2Path "plugins\texture_downscaler"
