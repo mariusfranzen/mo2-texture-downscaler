@@ -107,6 +107,7 @@ class MainDialog(QDialog):
         header_cache_path: Path | None = None,
         sort_state: dict | None = None,
         on_sort_changed: Callable[[dict], None] | None = None,
+        show_authors: bool = True,
         mod_refs: dict[str, NexusRef | None] | None = None,
         author_cache_path: Path | None = None,
         api_key_provider: Callable[[], str | None] | None = None,
@@ -137,6 +138,7 @@ class MainDialog(QDialog):
         self.mod_refs = mod_refs or {}
         self.author_cache_path = author_cache_path
         self.api_key_provider = api_key_provider
+        self.show_authors = show_authors
         self.author_worker: AuthorWorker | None = None
         self._pending_authors: dict[str, str] = {}
         self._mods_by_ref: dict[str, list[str]] = {}
@@ -154,7 +156,10 @@ class MainDialog(QDialog):
 
         self._build_ui()
         self._start_scan()
-        self._start_author_lookup()
+        if show_authors:
+            self._start_author_lookup()
+        else:
+            self.table.setColumnHidden(COL_AUTHOR, True)
 
     # ================================================================================== UI ====
 

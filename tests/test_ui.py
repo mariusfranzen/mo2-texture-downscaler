@@ -513,3 +513,80 @@ def test_plugin_collects_nexus_refs(tmp_path, monkeypatch):
         "LE port": NexusRef("skyrim", 12),  # falls back to the built-in mapping
         "Broken": None,
     }
+
+
+def test_authors_disabled_hides_column_and_skips_lookup(app, tmp_path):
+    from texture_downscaler.core.nexus import NexusRef
+    from texture_downscaler.ui.main_dialog import MainDialog
+    from texture_downscaler.ui.table_model import COL_AUTHOR
+
+    def no_key_please():
+        raise AssertionError("must not look up authors when disabled")
+
+    dlg = MainDialog(
+        sources=_make_mods(tmp_path),
+        output_dir=tmp_path / "out",
+        output_name="Output",
+        mode=RunMode.SKIP_DONE,
+        workers=1,
+        ensure_output_mod=lambda: None,
+        on_output_written=lambda: None,
+        show_authors=False,
+        mod_refs={"Mod A": NexusRef("skyrimspecialedition", 1)},
+        api_key_provider=no_key_please,
+    )
+    _wait(app, lambda: dlg.run_btn.isEnabled())
+    assert dlg.table.isColumnHidden(COL_AUTHOR) and dlg.author_worker is None
+    dlg.done(0)
+
+
+@pytest.mark.parametrize(
+    ("setting", "answer", "expected", "saved"),
+    [
+        ("ask", "Yes", True, "yes"),
+        ("ask", "No", False, "no"),
+        ("yes", None, True, None),
+        ("no", None, False, None),
+    ],
+)
+def test_author_lookup_prompt(app, monkeypatch, setting, answer, expected, saved):
+    class Base:
+        def __init__(self):
+            pass
+
+        def _parentWidget(self):
+            return None
+
+    stub = types.SimpleNamespace(
+        IPluginTool=Base,
+        IOrganizer=object,
+        VersionInfo=lambda *a: a,
+        PluginSetting=lambda *a: a,
+        ModState=enum.IntFlag("ModState", {"ACTIVE": 2}),
+        GuessedString=str,
+    )
+    monkeypatch.setitem(sys.modules, "mobase", stub)
+    sys.modules.pop("texture_downscaler.plugin", None)
+    from texture_downscaler.core.nexus import NexusRef
+    from texture_downscaler.plugin import TextureDownscalerTool
+
+    asked, writes = [], []
+
+    def question(parent, title, text):
+        asked.append(text)
+        return getattr(QMessageBox.StandardButton, answer)
+
+    monkeypatch.setattr(QMessageBox, "question", question)
+    org = types.SimpleNamespace(
+        pluginSetting=lambda name, key: setting,
+        setPluginSetting=lambda name, key, value: writes.append((key, value)),
+    )
+    plugin = TextureDownscalerTool()
+    plugin.init(org)
+    refs = {"A": NexusRef("skyrimspecialedition", 1), "B": NexusRef("skyrimspecialedition", 1), "C": None}
+    assert plugin._author_lookup_enabled(refs) is expected
+    assert writes == ([("author_lookup", saved)] if saved else [])
+    if answer:
+        assert "(1 for your enabled mods)" in asked[0] and "API allowance" in asked[0]
+    else:
+        assert asked == []

@@ -54,6 +54,11 @@ class TextureDownscalerTool(mobase.IPluginTool):
             mobase.PluginSetting("workers", "Parallel texconv processes (0 = automatic)", 0),
             mobase.PluginSetting("hidden_mods", "Mods hidden in the texture list (JSON list)", "[]"),
             mobase.PluginSetting("sort_state", "Table sort order (JSON)", "{}"),
+            mobase.PluginSetting(
+                "author_lookup",
+                "Look up mod authors on Nexus for the Author column: ask, yes or no",
+                "ask",
+            ),
             mobase.PluginSetting("hidden_authors", "Authors hidden in the texture list (JSON list)", "[]"),
             mobase.PluginSetting(
                 "nexus_api_key",
@@ -98,6 +103,8 @@ class TextureDownscalerTool(mobase.IPluginTool):
         sources = self._collect_sources(output_name)
         # Read on the main thread; the lookup thread must not call into MO2.
         self._manual_api_key = str(org.pluginSetting(self.name(), "nexus_api_key") or "").strip() or None
+        mod_refs = self._nexus_refs([s.name for s in sources])
+        show_authors = self._author_lookup_enabled(mod_refs)
         dialog = MainDialog(
             sources=sources,
             output_dir=output_dir,
@@ -111,9 +118,10 @@ class TextureDownscalerTool(mobase.IPluginTool):
             header_cache_path=self._cache_path(),
             sort_state=self._load_json_setting("sort_state", dict),
             on_sort_changed=lambda state: self._save_json_setting("sort_state", state),
-            mod_refs=self._nexus_refs([s.name for s in sources]),
+            show_authors=show_authors,
+            mod_refs=mod_refs if show_authors else None,
             author_cache_path=self._cache_path().with_name("nexus_authors.json"),
-            api_key_provider=self._api_key,
+            api_key_provider=self._api_key if show_authors else None,
             hidden_authors=set(self._load_json_setting("hidden_authors", list)),
             on_hidden_authors_changed=lambda authors: self._save_json_setting(
                 "hidden_authors", sorted(authors, key=str.lower)
@@ -193,6 +201,31 @@ class TextureDownscalerTool(mobase.IPluginTool):
                 continue
             sources.append(LooseModSource(name, Path(mod.absolutePath())))
         return sources
+
+    def _author_lookup_enabled(self, mod_refs: dict[str, NexusRef | None]) -> bool:
+        """Return whether to look up authors on Nexus, asking once if the user hasn't decided yet."""
+        setting = str(self._organizer.pluginSetting(self.name(), "author_lookup") or "ask").strip().lower()
+        if setting in ("yes", "true", "1", "on"):
+            return True
+        if setting in ("no", "false", "0", "off"):
+            return False
+        pages = len({r.key for r in mod_refs.values() if r is not None})
+        answer = QMessageBox.question(
+            self._parentWidget(),
+            "Texture Downscaler - mod authors",
+            "Do you want to show the author of each mod?\n\n"
+            "MO2 doesn't store mod authors, so the tool would look them up on Nexus Mods using the "
+            f"API key MO2 already has: one request per mod page ({pages} for your enabled mods), "
+            "done once in the background and then cached. Later, only newly installed mods are "
+            "looked up.\n\n"
+            "This shouldn't use any significant part of your Nexus API allowance: it is a small "
+            "fraction of the hourly limit, and the lookup pauses by itself if the allowance gets low "
+            "so MO2's update checks are not affected. Only Nexus mod IDs are sent.\n\n"
+            "You can change this later in MO2: Settings > Plugins > Texture Downscaler > author_lookup.",
+        )
+        enabled = answer == QMessageBox.StandardButton.Yes
+        self._organizer.setPluginSetting(self.name(), "author_lookup", "yes" if enabled else "no")
+        return enabled
 
     def _nexus_refs(self, mod_names: list[str]) -> dict[str, NexusRef | None]:
         """Mod name -> Nexus mod page (game domain + mod id), or None when it isn't a Nexus mod."""
