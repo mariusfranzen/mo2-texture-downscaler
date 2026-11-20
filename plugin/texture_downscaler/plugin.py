@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import QMessageBox
 
 from . import __version__
 from .core.downscaler import TEXCONV_PATH, default_workers
-from .core.nexus import NexusRef, game_domain, read_mo2_api_key
+from .core.nexus import NEXUS_ENABLED, NexusRef, game_domain, read_mo2_api_key
 from .core.output import Manifest, RunMode
 from .core.scanner import LooseModSource, TextureSource
 from .ui.main_dialog import MainDialog
@@ -56,6 +56,10 @@ class TextureDownscalerTool(mobase.IPluginTool):
             mobase.PluginSetting("workers", "Parallel texconv processes (0 = automatic)", 0),
             mobase.PluginSetting("hidden_mods", "Mods hidden in the texture list (JSON list)", "[]"),
             mobase.PluginSetting("sort_state", "Table sort order (JSON)", "{}"),
+        ] + (self._nexus_settings() if NEXUS_ENABLED else [])
+
+    def _nexus_settings(self) -> list[mobase.PluginSetting]:
+        return [
             mobase.PluginSetting(
                 "author_lookup",
                 "Look up mod authors on Nexus for the Author column: ask, yes or no",
@@ -103,10 +107,6 @@ class TextureDownscalerTool(mobase.IPluginTool):
             workers = 0
 
         sources = self._collect_sources(output_name)
-        # Read on the main thread; the lookup thread must not call into MO2.
-        self._manual_api_key = str(org.pluginSetting(self.name(), "nexus_api_key") or "").strip() or None
-        mod_refs = self._nexus_refs([s.name for s in sources])
-        auto_fetch_authors = self._author_lookup_enabled(mod_refs)
         dialog = MainDialog(
             sources=sources,
             output_dir=output_dir,
@@ -120,17 +120,30 @@ class TextureDownscalerTool(mobase.IPluginTool):
             header_cache_path=self._cache_path(),
             sort_state=self._load_json_setting("sort_state", dict),
             on_sort_changed=lambda state: self._save_json_setting("sort_state", state),
-            auto_fetch_authors=auto_fetch_authors,
-            mod_refs=mod_refs,
-            author_cache_path=self._cache_path().with_name("nexus_authors.json"),
-            api_key_provider=self._api_key,
-            hidden_authors=set(self._load_json_setting("hidden_authors", list)),
-            on_hidden_authors_changed=lambda authors: self._save_json_setting(
-                "hidden_authors", sorted(authors, key=str.lower)
-            ),
             parent=parent,
+            **self._author_dialog_args(sources),
         )
         dialog.exec()
+
+    def _author_dialog_args(self, sources: list[TextureSource]) -> dict:
+        """Dialog arguments for the Nexus author column; everything off while NEXUS_ENABLED is False."""
+        if not NEXUS_ENABLED:
+            return {"authors_enabled": False}
+        # Read on the main thread; the lookup thread must not call into MO2.
+        self._manual_api_key = (
+            str(self._organizer.pluginSetting(self.name(), "nexus_api_key") or "").strip() or None
+        )
+        mod_refs = self._nexus_refs([s.name for s in sources])
+        return {
+            "auto_fetch_authors": self._author_lookup_enabled(mod_refs),
+            "mod_refs": mod_refs,
+            "author_cache_path": self._cache_path().with_name("nexus_authors.json"),
+            "api_key_provider": self._api_key,
+            "hidden_authors": set(self._load_json_setting("hidden_authors", list)),
+            "on_hidden_authors_changed": lambda authors: self._save_json_setting(
+                "hidden_authors", sorted(authors, key=str.lower)
+            ),
+        }
 
     # ---- helpers ---------------------------------------------------------------------------
 

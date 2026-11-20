@@ -3,7 +3,7 @@
 Copy (or link) this folder into MO2's `plugins` directory.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 
 def createPlugin():

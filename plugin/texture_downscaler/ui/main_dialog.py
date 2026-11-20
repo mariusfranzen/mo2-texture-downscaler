@@ -107,6 +107,7 @@ class MainDialog(QDialog):
         header_cache_path: Path | None = None,
         sort_state: dict | None = None,
         on_sort_changed: Callable[[dict], None] | None = None,
+        authors_enabled: bool = True,
         auto_fetch_authors: bool = True,
         mod_refs: dict[str, NexusRef | None] | None = None,
         author_cache_path: Path | None = None,
@@ -139,6 +140,7 @@ class MainDialog(QDialog):
         self.author_cache_path = author_cache_path
         self.api_key_provider = api_key_provider
         self.auto_fetch_authors = auto_fetch_authors
+        self.authors_enabled = authors_enabled
         self._author_queue: list[NexusRef] = []
         self.author_worker: AuthorWorker | None = None
         self._pending_authors: dict[str, str] = {}
@@ -157,7 +159,11 @@ class MainDialog(QDialog):
 
         self._build_ui()
         self._start_scan()
-        self._init_authors()
+        self.model.authors_enabled = authors_enabled
+        if authors_enabled:
+            self._init_authors()
+        else:
+            self.table.setColumnHidden(COL_AUTHOR, True)
 
     # ================================================================================== UI ====
 
@@ -180,7 +186,8 @@ class MainDialog(QDialog):
         self.secondary_combo = QComboBox()
         self.secondary_combo.addItem("(nothing)", None)
         for col, name in enumerate(HEADERS):
-            self.secondary_combo.addItem(name, col)
+            if col != COL_AUTHOR or self.authors_enabled:
+                self.secondary_combo.addItem(name, col)
         self.secondary_combo.setToolTip("Secondary sort column. Tip: Ctrl+click a column header to set it.")
         self.secondary_order = QPushButton()
         self.secondary_order.setCheckable(True)
@@ -417,6 +424,9 @@ class MainDialog(QDialog):
         # Columns are saved by name so adding columns doesn't scramble a saved sort.
         col = HEADERS.index(state["column"]) if state.get("column") in HEADERS else COL_RES
         sec = HEADERS.index(state["secondary"]) if state.get("secondary") in HEADERS else None
+        if not self.authors_enabled:  # don't sort by a hidden column
+            col = COL_RES if col == COL_AUTHOR else col
+            sec = None if sec == COL_AUTHOR else sec
         self.secondary_combo.blockSignals(True)
         self.secondary_order.blockSignals(True)
         self.secondary_combo.setCurrentIndex(max(0, self.secondary_combo.findData(sec)))
@@ -642,7 +652,7 @@ class MainDialog(QDialog):
         selected_authors = sorted(
             {self.model.mod_authors.get(m, UNKNOWN) for m in selected_mods}, key=str.lower
         )
-        if selected_authors:
+        if self.authors_enabled and selected_authors:
             author_label = (
                 f'Hide author "{selected_authors[0]}"'
                 if len(selected_authors) == 1
@@ -738,11 +748,12 @@ class MainDialog(QDialog):
             return
         menu = QMenu(self)
         self._add_fetch_actions(menu, [])
-        menu.exec(header.mapToGlobal(pos))
+        if menu.actions():
+            menu.exec(header.mapToGlobal(pos))
 
     def _add_fetch_actions(self, menu: QMenu, selected_mods: list[str]) -> None:
         """'Fetch author' entries; no-op entries are hidden rather than shown disabled."""
-        if self.api_key_provider is None or not self.mod_refs:
+        if not self.authors_enabled or self.api_key_provider is None or not self.mod_refs:
             return
         selected = self._unfetched_refs(selected_mods)
         everything = self._unfetched_refs(None)

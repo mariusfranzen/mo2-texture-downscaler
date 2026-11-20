@@ -60,6 +60,7 @@ class TextureTableModel(QAbstractTableModel):
         # Mods missing here haven't been looked up yet (also shown as UNKNOWN).
         self.mod_authors: dict[str, str] = {}
         self.fetching_mods: set[str] = set()  # lookup queued or running -> shown as "..."
+        self.authors_enabled = True  # False: no author data at all (column hidden)
         self._bold = QFont()
         self._bold.setBold(True)
         self._target_brush = QBrush(QColor(70, 140, 255, 45))
@@ -101,6 +102,8 @@ class TextureTableModel(QAbstractTableModel):
         self.layoutChanged.emit()
 
     def author(self, e: TextureEntry) -> str:
+        if not self.authors_enabled:
+            return ""
         return self.mod_authors.get(e.mod, UNKNOWN)
 
     def set_mod_authors(self, authors: dict[str, str]) -> None:

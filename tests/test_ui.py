@@ -657,3 +657,61 @@ def test_plugin_metadata_methods(monkeypatch):
     assert plugin.version() == (major, minor, patch, 0)
     for method in ("name", "author", "description", "displayName", "tooltip", "settings", "requirements"):
         assert getattr(plugin, method)() is not None
+
+
+def test_nexus_disabled_hides_everything_author_related(app, tmp_path, monkeypatch):
+    from PyQt6.QtWidgets import QMenu
+
+    from texture_downscaler.core import nexus
+    from texture_downscaler.ui.main_dialog import MainDialog
+    from texture_downscaler.ui.table_model import COL_AUTHOR
+
+    assert nexus.NEXUS_ENABLED is False  # public builds must not talk to Nexus until registered
+
+    dlg = MainDialog(
+        sources=_make_mods(tmp_path),
+        output_dir=tmp_path / "out",
+        output_name="Output",
+        mode=RunMode.SKIP_DONE,
+        workers=1,
+        ensure_output_mod=lambda: None,
+        on_output_written=lambda: None,
+        authors_enabled=False,
+        sort_state={"column": "Author", "descending": True, "secondary": "Author", "secondary_desc": False},
+    )
+    _wait(app, lambda: dlg.run_btn.isEnabled())
+    assert dlg.table.isColumnHidden(COL_AUTHOR) and dlg.author_worker is None
+    assert dlg.secondary_combo.findData(COL_AUTHOR) == -1
+    assert dlg.table.horizontalHeader().sortIndicatorSection() != COL_AUTHOR
+    dlg.hide_combo.setCurrentIndex(dlg.hide_combo.findData(0))
+    dlg.search.setText("unknown")  # must not match every row via a phantom author
+    assert dlg.proxy.rowCount() == 0
+    menu = QMenu()
+    dlg._add_fetch_actions(menu, ["Mod A"])
+    assert menu.actions() == []
+    dlg.done(0)
+
+
+def test_plugin_without_nexus_has_no_nexus_settings_or_prompt(monkeypatch):
+    class Base:
+        def __init__(self):
+            pass
+
+    stub = types.SimpleNamespace(
+        IPluginTool=Base,
+        IOrganizer=object,
+        VersionInfo=lambda *a: a,
+        PluginSetting=lambda *a: a,
+        ModState=enum.IntFlag("ModState", {"ACTIVE": 2}),
+        GuessedString=str,
+    )
+    monkeypatch.setitem(sys.modules, "mobase", stub)
+    sys.modules.pop("texture_downscaler.plugin", None)
+    from texture_downscaler.plugin import TextureDownscalerTool
+
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: pytest.fail("must not ask about Nexus"))
+    plugin = TextureDownscalerTool()
+    plugin.init(types.SimpleNamespace())
+    names = [s[0] for s in plugin.settings()]
+    assert not {"author_lookup", "nexus_api_key", "hidden_authors"} & set(names)
+    assert plugin._author_dialog_args([]) == {"authors_enabled": False}

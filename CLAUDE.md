@@ -85,6 +85,13 @@ scripts/make_release.ps1        # build the release ZIP from tag v<__version__> 
   so deleted files drop out.
 - **Persisted UI state** (plugin settings, JSON): `hidden_mods`, `sort_state` (primary column and
   direction, secondary column and direction). Restoring state must not trigger a save.
+- **Nexus features are switched OFF** (`NEXUS_ENABLED = False` in `core/nexus.py`, since 1.0.1). The
+  Nexus API Acceptable Use Policy forbids personal API keys (and, by extension, MO2's SSO key) in
+  public-facing apps. The app must be registered with Nexus (support@nexusmods.com) and use SSO with
+  the slug Nexus issues. While the flag is off, the dialog gets `authors_enabled=False`: the Author
+  column is hidden, nothing is sent to Nexus, and the Nexus plugin settings and menu entries are gone.
+  The code below stays so it can be re-enabled after registration. Keep `NEXUS_ENABLED` False in any
+  release until then (a test enforces this).
 - **Author column** = the Nexus `uploaded_by` account name (agreed with the user, rather than the
   free-text `author` field). MO2 doesn't store authors, so `core/nexus.py` looks them up via
   `GET /v1/games/{domain}/mods/{id}.json` one at a time in `AuthorWorker` (about 0.2 s each).

@@ -18,6 +18,13 @@ from pathlib import Path
 
 from .. import __version__
 
+# Switched off for public releases until the app is registered with Nexus Mods: their API
+# Acceptable Use Policy doesn't allow personal API keys (or keys issued to another app, such as
+# MO2's) in public-facing applications. With this False, nothing is ever sent to Nexus and the
+# Author column, its settings and its menu entries are hidden. Re-enable together with SSO login
+# using the slug Nexus issues on registration.
+NEXUS_ENABLED = False
+
 API_URL = "https://api.nexusmods.com/v1/games/{game}/mods/{mod_id}.json"
 MO2_CREDENTIAL = "ModOrganizer2_APIKEY"
 APP_NAME = "Texture Downscaler (MO2 plugin)"
