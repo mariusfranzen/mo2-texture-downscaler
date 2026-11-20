@@ -290,3 +290,22 @@ def test_hidden_mods_are_restored_and_saved(app, tmp_path):
     dlg._unhide_all_mods()
     assert saved == [set()] and dlg.proxy.rowCount() == 3
     dlg.done(0)
+
+
+def test_hide_already_downscaled(app, tmp_path, monkeypatch):
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: 0)
+    dlg, _, written = _dialog(app, tmp_path)
+    dlg.hide_combo.setCurrentIndex(dlg.hide_combo.findData(0))
+    dlg.hide_done.setChecked(True)
+    assert dlg.proxy.rowCount() == 3
+
+    dlg.model.set_target([i for i, e in enumerate(dlg.model.entries) if e.key.endswith("wall.dds")], 64)
+    dlg._run()
+    _wait(app, lambda: written)
+    assert dlg.proxy.rowCount() == 2  # wall.dds is done -> hidden right after the run
+
+    wall = next(i for i, e in enumerate(dlg.model.entries) if e.key.endswith("wall.dds"))
+    dlg._set_rows([wall], None)  # unmarking makes it pending (output will be removed) -> visible
+    assert dlg.proxy.rowCount() == 3
+    dlg.done(0)

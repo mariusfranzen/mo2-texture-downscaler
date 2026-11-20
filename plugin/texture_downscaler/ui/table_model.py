@@ -164,6 +164,7 @@ class TextureFilterProxy(QSortFilterProxyModel):
         self.ttype: TextureType | None = None
         self.text_terms: list[str] = []
         self.only_targeted = False
+        self.hide_done = False
         self.setSortRole(SORT_ROLE)
         self.setDynamicSortFilter(False)
 
@@ -176,6 +177,7 @@ class TextureFilterProxy(QSortFilterProxyModel):
         ttype: TextureType | None,
         text: str,
         only_targeted: bool,
+        hide_done: bool = False,
     ) -> None:
         self.min_dim = min_dim
         self.mod = mod
@@ -183,6 +185,7 @@ class TextureFilterProxy(QSortFilterProxyModel):
         self.ttype = ttype
         self.text_terms = [t for t in text.lower().replace("\\", "/").split() if t]
         self.only_targeted = only_targeted
+        self.hide_done = hide_done
         self.invalidateFilter()
 
     def filterAcceptsRow(self, source_row, source_parent):
@@ -196,6 +199,9 @@ class TextureFilterProxy(QSortFilterProxyModel):
         if self.ttype is not None and e.ttype is not self.ttype:
             return False
         if self.only_targeted and e.target is None:
+            return False
+        # Done = output exists for the current target; a changed target makes it pending again.
+        if self.hide_done and e.done_target is not None and e.target == e.done_target:
             return False
         if self.text_terms:
             haystack = e.key + " " + e.mod.lower()

@@ -26,7 +26,8 @@ to what resolution. Output goes to a separate mod; original mod files are never 
     (select → Mark selected → Downscale...) and a live selection summary.
   - *Batch* acts on **all rows shown** by the filters: a size rule ("larger than X → Y"), max size per
     texture type, and unmark all shown.
-- **Filters:** search text, mod, type, "hide smaller than N", only marked, and hidden mods.
+- **Filters:** search text, mod, type, "hide smaller than N", only marked, hide already downscaled
+  (done for the current target; changing the target makes a row pending and visible again), and hidden mods.
 - **Right-click:** set or clear the target, *Deselect by type* / *Keep only type selected* (when the
   selection mixes types), hide the mod(s) of the selected rows, show only this mod or folder, reset filters.
 - **Hidden mods are remembered** in the plugin setting `hidden_mods` (a JSON list). Hidden mods are

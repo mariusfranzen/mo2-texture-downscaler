@@ -171,6 +171,10 @@ class MainDialog(QDialog):
             self.hide_combo.addItem("Show all sizes" if d == 0 else f"Hide smaller than {fmt_dim(d)}", d)
         self.hide_combo.setCurrentIndex(self.hide_combo.findData(2048))
         self.only_marked = QCheckBox("Only marked")
+        self.hide_done = QCheckBox("Hide already downscaled")
+        self.hide_done.setToolTip(
+            "Hide textures whose downscaled version for the current target already exists"
+        )
         self.hidden_mods: set[str] = set(self._initial_hidden_mods)
         self.unhide_btn = QPushButton()
         self.unhide_btn.setToolTip("Show all mods you hid via right-click again")
@@ -184,6 +188,7 @@ class MainDialog(QDialog):
         filters.addWidget(self.type_combo)
         filters.addWidget(self.hide_combo)
         filters.addWidget(self.only_marked)
+        filters.addWidget(self.hide_done)
         filters.addWidget(self.unhide_btn)
         root.addLayout(filters)
 
@@ -191,6 +196,7 @@ class MainDialog(QDialog):
         for combo in (self.mod_combo, self.type_combo, self.hide_combo):
             combo.currentIndexChanged.connect(self._apply_filters)
         self.only_marked.toggled.connect(self._apply_filters)
+        self.hide_done.toggled.connect(self._apply_filters)
         self._update_unhide_button()
 
         # --- table + bulk panel
@@ -408,6 +414,7 @@ class MainDialog(QDialog):
             ttype=self.type_combo.currentData(),
             text=self.search.text(),
             only_targeted=self.only_marked.isChecked(),
+            hide_done=self.hide_done.isChecked(),
         )
         self._update_summary()
 
@@ -431,7 +438,7 @@ class MainDialog(QDialog):
 
     def _set_rows(self, rows: list[int], target: int | None) -> None:
         self.model.set_target(rows, target)
-        if self.only_marked.isChecked():
+        if self.only_marked.isChecked() or self.hide_done.isChecked():
             self._apply_filters()
         self._update_summary()
 
@@ -463,7 +470,7 @@ class MainDialog(QDialog):
             ]
             count += len(rows)
             self.model.set_target(rows, limit)
-        if self.only_marked.isChecked():
+        if self.only_marked.isChecked() or self.hide_done.isChecked():
             self._apply_filters()
         self._update_summary()
         self.scan_label.setText(f"Type limits applied to {count} shown textures.")
@@ -567,6 +574,7 @@ class MainDialog(QDialog):
         self.mod_combo.setCurrentIndex(0)
         self.type_combo.setCurrentIndex(0)
         self.only_marked.setChecked(False)
+        self.hide_done.setChecked(False)
         self._unhide_all_mods()
 
     # ================================================================================ run ====
@@ -647,6 +655,7 @@ class MainDialog(QDialog):
                 e.status = f"Failed: {r.message}"
                 failed.append(r)
         self.model.refresh_rows()
+        self._apply_filters()  # newly done rows may now be hidden
         self.mode = RunMode.SKIP_DONE  # outputs on disk now match the manifest
         self.on_output_written()
 
