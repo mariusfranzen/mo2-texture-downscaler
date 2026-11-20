@@ -715,3 +715,43 @@ def test_plugin_without_nexus_has_no_nexus_settings_or_prompt(monkeypatch):
     names = [s[0] for s in plugin.settings()]
     assert not {"author_lookup", "nexus_api_key", "hidden_authors"} & set(names)
     assert plugin._author_dialog_args([]) == {"authors_enabled": False}
+
+
+def test_icon_is_bundled_and_used(app, tmp_path, monkeypatch):
+    from PyQt6.QtGui import QImage
+
+    from texture_downscaler import ICON_PATH
+    from texture_downscaler.ui.main_dialog import MainDialog
+
+    image = QImage(str(ICON_PATH))
+    assert not image.isNull() and image.width() == image.height() == 256
+
+    dlg = MainDialog(
+        sources=[],
+        output_dir=tmp_path / "out",
+        output_name="Output",
+        mode=RunMode.SKIP_DONE,
+        workers=1,
+        ensure_output_mod=lambda: None,
+        on_output_written=lambda: None,
+    )
+    assert not dlg.windowIcon().isNull()
+    dlg.done(0)
+
+    class Base:
+        def __init__(self):
+            pass
+
+    stub = types.SimpleNamespace(
+        IPluginTool=Base,
+        IOrganizer=object,
+        VersionInfo=lambda *a: a,
+        PluginSetting=lambda *a: a,
+        ModState=enum.IntFlag("ModState", {"ACTIVE": 2}),
+        GuessedString=str,
+    )
+    monkeypatch.setitem(sys.modules, "mobase", stub)
+    sys.modules.pop("texture_downscaler.plugin", None)
+    from texture_downscaler.plugin import TextureDownscalerTool
+
+    assert not TextureDownscalerTool().icon().isNull()

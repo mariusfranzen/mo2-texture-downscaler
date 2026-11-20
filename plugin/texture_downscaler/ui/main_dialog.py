@@ -7,7 +7,7 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from PyQt6.QtCore import QEvent, QItemSelection, QItemSelectionModel, QModelIndex, Qt, QTimer
-from PyQt6.QtGui import QAction
+from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -32,6 +32,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from .. import ICON_PATH
 from ..core import output
 from ..core.downscaler import JobResult, estimated_size
 from ..core.nexus import UNKNOWN, AuthorCache, NexusRef
@@ -118,6 +119,8 @@ class MainDialog(QDialog):
     ):
         super().__init__(parent)
         self.setWindowTitle("Texture Downscaler")
+        if ICON_PATH.is_file():
+            self.setWindowIcon(QIcon(str(ICON_PATH)))
         self.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, True)
         self.resize(1500, 850)
 

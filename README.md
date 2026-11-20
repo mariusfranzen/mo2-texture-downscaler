@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo.png" width="128" alt="Texture Downscaler logo"></p>
+
 # MO2 Texture Downscaler
 
 A [Mod Organizer 2](https://github.com/ModOrganizer2/modorganizer) tool plugin for **Skyrim Special / Anniversary Edition**. It finds the highest-resolution textures across your enabled mods, then downscales the ones you choose to save VRAM.

@@ -9,7 +9,7 @@ import mobase
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QMessageBox
 
-from . import __version__
+from . import ICON_PATH, __version__
 from .core.downscaler import TEXCONV_PATH, default_workers
 from .core.nexus import NEXUS_ENABLED, NexusRef, game_domain, read_mo2_api_key
 from .core.output import Manifest, RunMode
@@ -85,7 +85,7 @@ class TextureDownscalerTool(mobase.IPluginTool):
         return "Find and downscale high-resolution textures"
 
     def icon(self) -> QIcon:
-        return QIcon()
+        return QIcon(str(ICON_PATH)) if ICON_PATH.is_file() else QIcon()
 
     def display(self) -> None:
         org = self._organizer

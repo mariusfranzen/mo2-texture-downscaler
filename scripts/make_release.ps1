@@ -64,6 +64,7 @@ try {
         "texture_downscaler/__init__.py",
         "texture_downscaler/plugin.py",
         "texture_downscaler/LICENSE",
+        "texture_downscaler/icon.png",
         "texture_downscaler/bin/texconv.exe",
         "texture_downscaler/bin/LICENSE-texconv.txt"
     )

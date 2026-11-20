@@ -55,6 +55,8 @@ plugin/texture_downscaler/      # the MO2 plugin package (copied/linked into <MO
 tests/                          # pytest; test_ui.py runs Qt offscreen with a stub `mobase`
 scripts/dev_link.ps1            # junction plugin into an MO2 install
 scripts/make_release.ps1        # build the release ZIP from tag v<__version__> (never tags/pushes)
+scripts/make_icon.py            # regenerate plugin icon.png (256px) from assets/logo.png
+assets/logo.png                 # 2048px logo (README header); the plugin ships only icon.png
 ```
 
 ## Key behaviours
