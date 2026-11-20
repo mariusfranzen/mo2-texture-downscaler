@@ -44,7 +44,8 @@ class TextureDownscalerTool(mobase.IPluginTool):
         )
 
     def version(self) -> mobase.VersionInfo:
-        return mobase.VersionInfo(0, 1, 0, 0)
+        major, minor, patch = (int(x) for x in __version__.split("."))
+        return mobase.VersionInfo(major, minor, patch, 0)
 
     def settings(self) -> list[mobase.PluginSetting]:
         return [

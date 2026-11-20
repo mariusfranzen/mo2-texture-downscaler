@@ -6,11 +6,10 @@ Your original mods are never modified. The downscaled textures go into a separat
 
 ## Features
 
-- **Scans every enabled mod**: about 60,000 textures across 700 mods in a few seconds, and under a second on later opens thanks to a header cache.
+- **Scans every enabled mod**: about 60,000 textures across 700 mods in a few seconds (tested on my setup), and under a second on later opens thanks to a header cache.
 - **Only shows the textures the game actually loads.** When several mods provide the same texture, only the winning file (highest priority in MO2) is listed.
 - **A sortable, filterable table** with these columns: texture path, mod, author, type, resolution, format, file size, target size, estimated new size and status.
   - Filter by search text, mod, texture type, "hide textures smaller than…", only marked, and hide already downscaled.
-  - Sort by a primary and a secondary column.
   - Hide whole mods or authors via right-click. Hidden mods and authors are remembered.
 - **Bulk tools:**
   - *Basic* tab: mark the selected textures for downscaling to a size.
@@ -20,7 +19,6 @@ Your original mods are never modified. The downscaled textures go into a separat
   - Keeps the original compression format (BC1/BC3/BC5/BC7, including sRGB).
   - Keeps the aspect ratio and regenerates mipmaps.
   - Downscales in parallel.
-- **Safe re-runs:** the tool remembers what it did. On the next run it can skip textures that are already done, redo ones whose source mod was updated, and remove outputs you no longer want. You can also rebuild everything from scratch.
 - **Optional author column:** mod authors (Nexus uploader names) can be looked up on Nexus Mods. See [Mod authors](#mod-authors-nexus).
 
 ## Requirements
@@ -130,6 +128,14 @@ powershell -File scripts\dev_link.ps1 -Mo2Path "C:\Path\To\MO2"
 ```
 
 Keep `core/` free of `mobase` and Qt imports. The code must stay compatible with Python 3.12, MO2's embedded interpreter.
+
+## AI usage in development
+
+This mod was made with claude code, but the code has been reviewed and thoroughly tested by a professional developer.
+
+- At the point of writing this there are 48 unit tests
+- It has been tested with my own personal mod setup with 700 mods
+
 
 ## Credits
 
