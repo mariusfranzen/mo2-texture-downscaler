@@ -35,7 +35,7 @@ class TextureDownscalerTool(mobase.IPluginTool):
         return "Texture Downscaler"
 
     def author(self) -> str:
-        return "Texture Downscaler contributors"
+        return "Bitbyte"
 
     def description(self) -> str:
         return (
