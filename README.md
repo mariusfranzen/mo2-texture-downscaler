@@ -146,6 +146,14 @@ This mod was made with claude code, but the code has been reviewed and thoroughl
 - It has been tested with my own personal mod setup with 700 mods
 
 
+## License
+
+This project is licensed under the [GNU General Public License v3.0](LICENSE) (GPL-3.0-only), the same license as Mod Organizer 2.
+
+You're free to use, share and modify it. If you distribute a copy or a modified version, it must stay under GPLv3 and include its source code.
+
+The bundled texconv is licensed separately under the MIT license (see `plugin/texture_downscaler/bin/LICENSE-texconv.txt`).
+
 ## Credits
 
 - [DirectXTex / texconv](https://github.com/microsoft/DirectXTex) by Microsoft (MIT license, see `plugin/texture_downscaler/bin/LICENSE-texconv.txt`)
