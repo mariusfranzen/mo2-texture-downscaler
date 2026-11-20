@@ -74,7 +74,7 @@ class TargetDelegate(QStyledItemDelegate):
     def createEditor(self, parent, option, index):
         entry: TextureEntry = index.data(ENTRY_ROLE)
         combo = QComboBox(parent)
-        combo.addItem("- keep original", None)
+        combo.addItem("- keep original size", None)
         for c in TARGET_CHOICES:
             if c < entry.max_dim:
                 combo.addItem(fmt_dim(c), c)
@@ -171,9 +171,10 @@ class MainDialog(QDialog):
             self.hide_combo.addItem("Show all sizes" if d == 0 else f"Hide smaller than {fmt_dim(d)}", d)
         self.hide_combo.setCurrentIndex(self.hide_combo.findData(2048))
         self.only_marked = QCheckBox("Only marked")
+        self.only_marked.setToolTip("Show only textures marked for downscaling")
         self.hide_done = QCheckBox("Hide already downscaled")
         self.hide_done.setToolTip(
-            "Hide textures whose downscaled version for the current target already exists"
+            "Hide textures that were already downscaled to the size they are marked for"
         )
         self.hidden_mods: set[str] = set(self._initial_hidden_mods)
         self.unhide_btn = QPushButton()
@@ -238,7 +239,7 @@ class MainDialog(QDialog):
         # --- bottom bar
         bottom = QHBoxLayout()
         self.summary = QLabel()
-        self.run_btn = QPushButton("Downscale...")
+        self.run_btn = QPushButton("Downscale marked textures...")
         self.run_btn.setDefault(True)
         self.run_btn.clicked.connect(self._run)
         close_btn = QPushButton("Close")
@@ -262,8 +263,8 @@ class MainDialog(QDialog):
 
         steps = QLabel(
             "<b>1.</b> Select textures in the table (Ctrl / Shift-click, Ctrl+A for all shown).<br>"
-            "<b>2.</b> Choose a size and click <b>Mark selected</b>.<br>"
-            "<b>3.</b> Click <b>Downscale...</b> at the bottom to process every marked texture."
+            "<b>2.</b> Choose a size and click <b>Mark for downscaling</b>. Marked rows turn blue.<br>"
+            "<b>3.</b> Click <b>Downscale marked textures</b> at the bottom. Nothing is written until then."
         )
         steps.setWordWrap(True)
         layout.addWidget(steps)
@@ -277,16 +278,16 @@ class MainDialog(QDialog):
         self.sel_target = _size_combo(TARGET_CHOICES, default=2048)
         form.addRow("Downscale to:", self.sel_target)
         bl.addLayout(form)
-        mark_btn = QPushButton("Mark selected")
+        mark_btn = QPushButton("Mark for downscaling")
         mark_btn.clicked.connect(lambda: self._set_selected(self.sel_target.currentData()))
         bl.addWidget(mark_btn)
-        keep_btn = QPushButton("Unmark selected (keep original)")
+        keep_btn = QPushButton("Unmark (keep original size)")
         keep_btn.clicked.connect(lambda: self._set_selected(None))
         bl.addWidget(keep_btn)
         layout.addWidget(box)
 
         tip = QLabel(
-            "Tips: double-click a <i>Target</i> cell to set one texture. Right-click rows to hide a mod, "
+            "Tips: double-click a <i>Downscale to</i> cell to change one texture. Right-click rows to hide a mod, "
             "deselect a texture type, or filter to a mod/folder. Textures already at or below the "
             "chosen size are left alone."
         )
@@ -313,7 +314,7 @@ class MainDialog(QDialog):
         self.rule_target = _size_combo(TARGET_CHOICES, default=2048)
         rule.addRow("Textures larger than:", self.rule_above)
         rule.addRow("Downscale to:", self.rule_target)
-        btn = QPushButton("Mark shown textures")
+        btn = QPushButton("Mark shown for downscaling")
         btn.clicked.connect(self._apply_size_rule)
         rule.addRow(btn)
         layout.addWidget(rule_box)
@@ -326,12 +327,12 @@ class MainDialog(QDialog):
             combo = _size_combo(TARGET_CHOICES, none_label="No limit")
             self.type_limit_combos[t] = combo
             tf.addRow(f"{t.value}:", combo)
-        btn = QPushButton("Mark shown textures")
+        btn = QPushButton("Mark shown for downscaling")
         btn.clicked.connect(self._apply_type_limits)
         tf.addRow(btn)
         layout.addWidget(type_box)
 
-        clear_btn = QPushButton("Unmark all shown textures")
+        clear_btn = QPushButton("Unmark all shown (keep original size)")
         clear_btn.clicked.connect(lambda: self._set_rows(self._visible_rows(), None))
         layout.addWidget(clear_btn)
         layout.addStretch(1)
@@ -431,8 +432,22 @@ class MainDialog(QDialog):
         after = sum(estimated_size(e.size, e.info, e.target) for e in marked)
         text = f"Showing {self.proxy.rowCount()} of {len(entries)} textures  |  {len(marked)} marked"
         if marked:
-            text += f"  |  {fmt_bytes(before)} -> ~{fmt_bytes(after)} (saves ~{fmt_bytes(before - after)})"
+            text += (
+                f"  |  VRAM if all loaded: {fmt_bytes(before)} -> ~{fmt_bytes(after)}"
+                f" (-{fmt_bytes(before - after)})  |  output mod adds ~{fmt_bytes(after)} on disk"
+            )
         self.summary.setText(text)
+        self.summary.setToolTip(
+            "VRAM: a compressed texture takes about as much video memory as its file size. The saving "
+            "is an upper bound - the game only loads textures for what is around you.\n"
+            "Disk: the original files stay in their mods; the downscaled copies are added to the "
+            "output mod, so disk usage goes up by the new size."
+        )
+        self.run_btn.setText(
+            f"Downscale {len(marked)} marked texture{'s' if len(marked) != 1 else ''}..."
+            if marked
+            else "Downscale marked textures..."
+        )
 
     # ======================================================================= bulk actions ====
 
@@ -454,7 +469,7 @@ class MainDialog(QDialog):
         rows = [r for r in self._visible_rows() if self.model.entries[r].max_dim > above]
         self._set_rows(rows, target)
         self.scan_label.setText(
-            f"Size rule: {len(rows)} shown textures larger than {fmt_dim(above)} set to {fmt_dim(target)}."
+            f"Size rule: marked {len(rows)} shown textures larger than {fmt_dim(above)} for downscaling to {fmt_dim(target)}."
         )
 
     def _apply_type_limits(self) -> None:
@@ -483,12 +498,12 @@ class MainDialog(QDialog):
         rows = self._selected_rows()
         menu = QMenu(self)
 
-        target_menu = menu.addMenu(f"Set target for {len(rows)} selected")
+        target_menu = menu.addMenu(f"Mark {len(rows)} selected for downscaling to")
         for c in TARGET_CHOICES:
             act = QAction(fmt_dim(c), target_menu)
             act.triggered.connect(lambda _=False, c=c: self._set_selected(c))
             target_menu.addAction(act)
-        menu.addAction("Keep original (clear target)", lambda: self._set_selected(None))
+        menu.addAction("Unmark (keep original size)", lambda: self._set_selected(None))
         type_counts: dict[TextureType, int] = {}
         for r in rows:
             t = self.model.entries[r].ttype
@@ -587,7 +602,7 @@ class MainDialog(QDialog):
             if plan.skipped:
                 msg += f" All {plan.skipped} marked textures are already downscaled."
             else:
-                msg += " Mark some textures with a target size first."
+                msg += " Mark some textures for downscaling first."
             QMessageBox.information(self, "Texture Downscaler", msg)
             return
 

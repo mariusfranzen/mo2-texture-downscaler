@@ -309,3 +309,12 @@ def test_hide_already_downscaled(app, tmp_path, monkeypatch):
     dlg._set_rows([wall], None)  # unmarking makes it pending (output will be removed) -> visible
     assert dlg.proxy.rowCount() == 3
     dlg.done(0)
+
+
+def test_summary_and_run_button_wording(app, tmp_path):
+    dlg, _, _ = _dialog(app, tmp_path)
+    assert dlg.run_btn.text() == "Downscale marked textures..."
+    dlg.model.set_target([i for i, e in enumerate(dlg.model.entries) if e.key.endswith("wall.dds")], 64)
+    assert dlg.run_btn.text() == "Downscale 1 marked texture..."
+    assert "VRAM if all loaded" in dlg.summary.text() and "on disk" in dlg.summary.text()
+    dlg.done(0)

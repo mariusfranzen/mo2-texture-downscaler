@@ -15,7 +15,7 @@ ENTRY_ROLE = Qt.ItemDataRole.UserRole + 2
 TARGET_CHOICES: list[int] = [8192, 4096, 2048, 1024, 512, 256, 128]
 
 COL_PATH, COL_MOD, COL_TYPE, COL_RES, COL_FORMAT, COL_SIZE, COL_TARGET, COL_NEW, COL_STATUS = range(9)
-HEADERS = ["Texture", "Mod", "Type", "Resolution", "Format", "Size", "Target", "New size", "Status"]
+HEADERS = ["Texture", "Mod", "Type", "Resolution", "Format", "Size", "Downscale to", "New size", "Status"]
 
 
 def fmt_bytes(n: float) -> str:
