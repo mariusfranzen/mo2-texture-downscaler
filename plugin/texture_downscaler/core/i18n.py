@@ -12,8 +12,11 @@ English uses "one"/"other". Languages with more forms (e.g. Russian: one/few/man
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable, Iterable
 from pathlib import Path
+
+_log = logging.getLogger(__name__)
 
 I18N_DIR = Path(__file__).resolve().parent.parent / "i18n"
 DEFAULT_LANGUAGE = "en"
@@ -67,9 +70,17 @@ _language = DEFAULT_LANGUAGE
 
 
 def _read(code: str) -> dict[str, object]:
+    path = I18N_DIR / f"{code}.json"
     try:
-        data = json.loads((I18N_DIR / f"{code}.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        # utf-8-sig: Windows Notepad may save with a BOM, which plain utf-8 json parsing rejects.
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except OSError:
+        return {}
+    except ValueError as e:
+        _log.warning("Texture Downscaler: ignoring broken language file %s: %s", path, e)
+        return {}
+    if not isinstance(data, dict):
+        _log.warning("Texture Downscaler: ignoring language file %s: not a JSON object", path)
         return {}
     return {k: v for k, v in data.items() if isinstance(k, str) and not k.startswith("_")}
 

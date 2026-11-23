@@ -57,13 +57,17 @@ def test_english_plural_entries_have_one_and_other():
 
 def test_all_translations_are_valid_and_use_only_known_placeholders():
     for path in (PLUGIN_DIR / "i18n").glob("*.json"):
-        data = json.loads(path.read_text(encoding="utf-8"))  # must be valid JSON
+        data = json.loads(path.read_text(encoding="utf-8-sig"))  # must be valid JSON
+        rule = i18n.PLURAL_RULES.get(path.stem, i18n._plural_en)
+        forms = {rule(n) for n in range(200)}  # every form this language needs
         for key, value in data.items():
             if key.startswith("_"):
                 continue
             assert key in EN_KEYS, f"{path.name}: unknown key {key}"
             assert isinstance(value, (str, dict)), f"{path.name}: {key}"
             assert _placeholders(value) <= _placeholders(EN[key]), f"{path.name}: {key} placeholders"
+            if isinstance(value, dict):
+                assert forms <= set(value), f"{path.name}: {key} lacks plural forms {forms - set(value)}"
 
 
 def test_no_hardcoded_english_in_ui_widgets():
@@ -123,6 +127,19 @@ def test_unknown_or_broken_language_falls_back_to_english(lang_dir):
     (lang_dir / "de.json").write_text("{ not json", encoding="utf-8")
     assert i18n.load("de") == "en"
     assert tr("basic.mark") == "Mark for downscaling"
+
+
+def test_language_file_with_bom_loads(lang_dir):
+    """Windows Notepad saves UTF-8 with a BOM; that must not silently disable a translation."""
+    (lang_dir / "ru.json").write_text('{"basic.mark": "Отметить"}', encoding="utf-8-sig")
+    assert i18n.load("ru") == "ru"
+    assert tr("basic.mark") == "Отметить"
+
+
+def test_broken_language_file_is_logged(lang_dir, caplog):
+    (lang_dir / "de.json").write_text("{ not json", encoding="utf-8")
+    assert i18n.load("de") == "en"
+    assert "de.json" in caplog.text
 
 
 def test_resolve_language(lang_dir):
