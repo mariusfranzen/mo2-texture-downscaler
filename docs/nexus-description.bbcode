@@ -17,8 +17,8 @@ Your original mods are [b]never modified[/b]. The downscaled textures go into a 
 [list]
 [*][b]Scans your whole load order in seconds[/b] (about 60,000 textures across 700 mods in a few seconds, and under a second on later opens thanks to a cache)[/*]
 [*][b]Only shows what the game actually loads:[/b] when several mods provide the same texture, only the winning file is listed[/*]
-[*][b]Sortable, filterable table:[/b] resolution, format, file size, texture type (diffuse, normal, specular, glow, ...) and mod[/*]
-[*]Filter by mod, folder, texture type or search text, hide textures below a certain size, and hide mods you never want to touch (remembered between sessions)[/*]
+[*][b]Sortable, filterable table:[/b] resolution, format, file size, texture type (diffuse, normal, specular, glow, ...), mod and mod author[/*]
+[*]Filter by mod, folder, texture type or search text, hide textures below a certain size, and hide mods or authors you never want to touch (remembered between sessions)[/*]
 [*][b]Bulk tools:[/b] size rules ("everything larger than 4K → 2K") and a maximum size per texture type[/*]
 [*]Shows the [b]estimated VRAM saving[/b] before you start[/*]
 [*][b]Keeps quality:[/b] the original compression format (BC1/BC3/BC5/BC7, including sRGB) and aspect ratio are kept, and mipmaps are regenerated, using Microsoft's texconv (bundled)[/*]
@@ -54,6 +54,14 @@ Nothing else is needed; texconv is included.
 [/*]
 [*]Click [b]Downscale N marked textures...[/b] Nothing is written before this step.[/*]
 [*]Make sure [i]Texture Downscaler Output[/i] is enabled and at the [b]bottom[/b] of your mod list (the tool does this when it creates the mod).[/*]
+[/list]
+
+[size=5][b]Mod authors[/b][/size]
+MO2 doesn't store mod authors, so the [i]Author[/i] column looks up the uploader's name on Nexus Mods.
+[list]
+[*]The first time you open the tool, it asks whether to look up authors automatically. Either way, you can right-click any texture (or the [i]Author[/i] column header) and choose [i]Fetch author[/i] or [i]Fetch all mod authors[/i] at any time.[/*]
+[*][b]No account, login or API key is needed.[/b] Only the Nexus IDs of your mods are sent. About 600 mods take roughly 5 seconds once; results are cached, so later only newly installed mods are looked up.[/*]
+[*]Mods that don't come from Nexus show as [i]Unknown[/i]. If a lookup fails (for example, no internet), you get a message and the authors found so far are kept.[/*]
 [/list]
 
 [size=5][b]What should I downscale?[/b][/size]
