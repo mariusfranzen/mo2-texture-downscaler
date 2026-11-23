@@ -435,7 +435,7 @@ def test_author_column_lookup_and_hide_author(app, tmp_path, monkeypatch):
     seed.put(ref_cached, "Carol")
     seed.save()
 
-    monkeypatch.setattr(nexus, "fetch_uploader", lambda ref, key: ("Fred", 1000))
+    monkeypatch.setattr(nexus, "fetch_uploaders", lambda batch: {r.key: "Fred" for r in batch})
     monkeypatch.setattr(nexus.time, "sleep", lambda s: None)
     saved_hidden = []
     dlg = MainDialog(
@@ -448,7 +448,6 @@ def test_author_column_lookup_and_hide_author(app, tmp_path, monkeypatch):
         on_output_written=lambda: None,
         mod_refs={"Cached": ref_cached, "Fetched": ref_fetched, "Fetched Too": ref_fetched, "Local": None},
         author_cache_path=cache_path,
-        api_key_provider=lambda: "secret",
         on_hidden_authors_changed=saved_hidden.append,
     )
     _wait(app, lambda: dlg.run_btn.isEnabled())
@@ -530,7 +529,9 @@ def test_no_auto_fetch_shows_unknown_and_fetches_on_demand(app, tmp_path, monkey
 
     fetched = []
     monkeypatch.setattr(
-        nexus, "fetch_uploader", lambda ref, key: fetched.append(ref.mod_id) or (f"U{ref.mod_id}", 999)
+        nexus,
+        "fetch_uploaders",
+        lambda batch: fetched.extend(r.mod_id for r in batch) or {r.key: f"U{r.mod_id}" for r in batch},
     )
     monkeypatch.setattr(nexus.time, "sleep", lambda s: None)
     refs = {"A": NexusRef("skyrimspecialedition", 1), "B": NexusRef("skyrimspecialedition", 2), "Local": None}
@@ -545,7 +546,6 @@ def test_no_auto_fetch_shows_unknown_and_fetches_on_demand(app, tmp_path, monkey
         auto_fetch_authors=False,
         mod_refs=refs,
         author_cache_path=tmp_path / "authors.json",
-        api_key_provider=lambda: "key",
     )
     _wait(app, lambda: dlg.run_btn.isEnabled())
     dlg.hide_combo.setCurrentIndex(dlg.hide_combo.findData(0))
@@ -627,7 +627,7 @@ def test_author_lookup_prompt(app, monkeypatch, setting, answer, expected, saved
     assert plugin._author_lookup_enabled(refs) is expected
     assert writes == ([("author_lookup", saved)] if saved else [])
     if answer:
-        assert "(1 for your enabled mods)" in asked[0] and "API allowance" in asked[0]
+        assert "(1 mod page)" in asked[0] and "no account, login or API key is needed" in asked[0]
     else:
         assert asked == []
 
@@ -659,14 +659,11 @@ def test_plugin_metadata_methods(monkeypatch):
         assert getattr(plugin, method)() is not None
 
 
-def test_nexus_disabled_hides_everything_author_related(app, tmp_path, monkeypatch):
+def test_authors_disabled_hides_everything_author_related(app, tmp_path, monkeypatch):
     from PyQt6.QtWidgets import QMenu
 
-    from texture_downscaler.core import nexus
     from texture_downscaler.ui.main_dialog import MainDialog
     from texture_downscaler.ui.table_model import COL_AUTHOR
-
-    assert nexus.NEXUS_ENABLED is False  # public builds must not talk to Nexus until registered
 
     dlg = MainDialog(
         sources=_make_mods(tmp_path),
@@ -707,13 +704,19 @@ def test_plugin_without_nexus_has_no_nexus_settings_or_prompt(monkeypatch):
     )
     monkeypatch.setitem(sys.modules, "mobase", stub)
     sys.modules.pop("texture_downscaler.plugin", None)
+    import texture_downscaler.plugin as plugin_module
     from texture_downscaler.plugin import TextureDownscalerTool
 
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: pytest.fail("must not ask about Nexus"))
     plugin = TextureDownscalerTool()
     plugin.init(types.SimpleNamespace())
     names = [s[0] for s in plugin.settings()]
-    assert not {"author_lookup", "nexus_api_key", "hidden_authors"} & set(names)
+    assert {"author_lookup", "hidden_authors"} <= set(names)  # Nexus lookup is on by default
+    assert "nexus_api_key" not in names  # no API keys anymore
+
+    monkeypatch.setattr(plugin_module, "NEXUS_ENABLED", False)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: pytest.fail("must not ask about Nexus"))
+    names = [s[0] for s in plugin.settings()]
+    assert not {"author_lookup", "hidden_authors"} & set(names)
     assert plugin._author_dialog_args([]) == {"authors_enabled": False}
 
 
@@ -755,3 +758,56 @@ def test_icon_is_bundled_and_used(app, tmp_path, monkeypatch):
     from texture_downscaler.plugin import TextureDownscalerTool
 
     assert not TextureDownscalerTool().icon().isNull()
+
+
+def test_author_lookup_failure_shows_popup_and_keeps_found_authors(app, tmp_path, monkeypatch):
+    from texture_downscaler.core import nexus
+    from texture_downscaler.core.nexus import NexusError, NexusRef
+    from texture_downscaler.ui.main_dialog import MainDialog
+    from texture_downscaler.ui.table_model import COL_AUTHOR, COL_MOD
+
+    def mod(name):
+        root = tmp_path / "mods" / name
+        write_fake_dds(root / "textures" / f"{name}.dds", 2048, 2048)
+        return LooseModSource(name, root)
+
+    def fetch(batch):
+        if any(r.mod_id == 2 for r in batch):
+            raise NexusError("Nexus Mods couldn't be reached.", "URLError: offline")
+        return {r.key: "Alice" for r in batch}
+
+    monkeypatch.setattr(nexus, "fetch_uploaders", fetch)
+    monkeypatch.setattr(nexus, "BATCH_SIZE", 1)
+    monkeypatch.setattr(nexus.time, "sleep", lambda s: None)
+    popups = []
+    monkeypatch.setattr(QMessageBox, "open", lambda self: popups.append((self.text(), self.detailedText())))
+
+    refs = {"A": NexusRef("skyrimspecialedition", 1), "B": NexusRef("skyrimspecialedition", 2)}
+    dlg = MainDialog(
+        sources=[mod("A"), mod("B")],
+        output_dir=tmp_path / "out",
+        output_name="Output",
+        mode=RunMode.SKIP_DONE,
+        workers=1,
+        ensure_output_mod=lambda: None,
+        on_output_written=lambda: None,
+        auto_fetch_authors=False,
+        mod_refs=refs,
+        author_cache_path=tmp_path / "authors.json",
+    )
+    _wait(app, lambda: dlg.run_btn.isEnabled())
+    dlg.fetch_authors(None)
+    _wait(app, lambda: not dlg.author_worker.isRunning())
+    for _ in range(5):
+        app.processEvents()
+
+    assert len(popups) == 1
+    text, details = popups[0]
+    assert "couldn't be reached" in text and "Fetch all mod authors" in text and "offline" in details
+    authors = {
+        dlg.proxy.index(r, COL_MOD).data(): dlg.proxy.index(r, COL_AUTHOR).data()
+        for r in range(dlg.proxy.rowCount())
+    }
+    assert authors == {"A": "Alice", "B": "Unknown"}  # A kept, B not stuck on "..."
+    assert "stopped" in dlg.author_label.text()
+    dlg.done(0)

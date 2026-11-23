@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import traceback
-from collections.abc import Callable
 from pathlib import Path
 
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -97,36 +96,30 @@ class AuthorWorker(QThread):
 
     found = pyqtSignal(str, str)  # NexusRef.key, uploader ("" = not found)
     progress = pyqtSignal(int, int)
-    finished_msg = pyqtSignal(str)
+    finished_msg = pyqtSignal(str)  # always emitted last (status line text, may be "")
+    failed = pyqtSignal(str, str)  # message, technical details -> error popup
 
-    def __init__(
-        self,
-        refs: list[NexusRef],
-        cache: AuthorCache,
-        api_key_provider: Callable[[], str | None],
-        parent=None,
-    ):
+    def __init__(self, refs: list[NexusRef], cache: AuthorCache, parent=None):
         super().__init__(parent)
         self.refs = refs
         self.cache = cache
-        self.api_key_provider = api_key_provider
         self.cancel = False
 
     def run(self):
+        total = len(self.refs)
+        count = [0]
+
+        def on_result(ref: NexusRef, author: str) -> None:
+            count[0] += 1
+            self.found.emit(ref.key, author)
+            self.progress.emit(count[0], total)
+
         try:
-            api_key = self.api_key_provider()
-            if not api_key:
-                self.finished_msg.emit(tr("authors.no_key"))
-                return
-            total = len(self.refs)
-            count = [0]
-
-            def on_result(ref: NexusRef, author: str) -> None:
-                count[0] += 1
-                self.found.emit(ref.key, author)
-                self.progress.emit(count[0], total)
-
-            msg = nexus.fetch_missing(self.refs, self.cache, api_key, on_result, lambda: self.cancel)
-            self.finished_msg.emit(msg)
+            msg = nexus.fetch_missing(self.refs, self.cache, on_result, lambda: self.cancel)
+        except nexus.NexusError as e:
+            self.failed.emit(str(e), e.details)
+            msg = tr("authors.failed_short", done=count[0], total=total)
         except Exception:
-            self.finished_msg.emit(tr("authors.failed") + "\n" + traceback.format_exc(limit=3))
+            self.failed.emit(tr("authors.error_unexpected"), traceback.format_exc(limit=5))
+            msg = tr("authors.failed_short", done=count[0], total=total)
+        self.finished_msg.emit(msg)

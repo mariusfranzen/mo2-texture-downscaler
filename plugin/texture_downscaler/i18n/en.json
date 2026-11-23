@@ -13,7 +13,6 @@
   "setting.language": "Interface language, e.g. en or ru. Leave empty to use MO2's language. Restart MO2 after changing it.",
   "setting.author_lookup": "Look up mod authors on Nexus for the Author column: ask, yes or no",
   "setting.hidden_authors": "Authors hidden in the texture list (JSON list)",
-  "setting.nexus_api_key": "Nexus API key for the Author column. Leave empty to use the key MO2 saved when you logged in to Nexus",
 
   "run_mode.text": {
     "one": "The output mod '{mod}' already contains {count} downscaled texture from a previous run.\n\nWhat do you want to do?",
@@ -24,7 +23,7 @@
   "run_mode.rebuild": "Rebuild from scratch",
 
   "authors_prompt.title": "Texture Downscaler - mod authors",
-  "authors_prompt.text": "Do you want to look up the author of each mod automatically?\n\nMO2 doesn't store mod authors, so the tool would look them up on Nexus Mods using the API key MO2 already has: one request per mod page ({count} for your enabled mods), done once in the background and then cached. Later, only newly installed mods are looked up.\n\nThis shouldn't use any significant part of your Nexus API allowance: it is a small fraction of the hourly limit, and the lookup pauses by itself if the allowance gets low so MO2's update checks are not affected. Only Nexus mod IDs are sent.\n\nIf you choose No, authors show as Unknown. You can still right-click any texture (or the Author column header) and choose Fetch author / Fetch all mod authors at any time. To change the automatic lookup later: MO2 Settings > Plugins > Texture Downscaler > author_lookup.",
+  "authors_prompt.text": "Do you want to look up the author of each mod automatically?\n\nMO2 doesn't store mod authors, so the tool would look them up on Nexus Mods. It uses Nexus' public mod information: no account, login or API key is needed, and only the Nexus IDs of your mods ({pages}) are sent. This takes a few seconds once; the results are cached and later only newly installed mods are looked up.\n\nIf you choose No, authors show as Unknown. You can still right-click any texture (or the Author column header) and choose Fetch author / Fetch all mod authors at any time. To change the automatic lookup later: MO2 Settings > Plugins > Texture Downscaler > author_lookup.",
 
   "column.texture": "Texture",
   "column.mod": "Mod",
@@ -95,6 +94,7 @@
   "filter.tip_unhide": "Show all mods you hid via right-click again",
 
   "count.mods": {"one": "{count} mod", "other": "{count} mods"},
+  "count.mod_pages": {"one": "{count} mod page", "other": "{count} mod pages"},
   "count.authors": {"one": "{count} author", "other": "{count} authors"},
   "hidden.unhide": "Unhide {what}",
   "hidden.tip_mods": "Hidden mods: {list}",
@@ -160,14 +160,15 @@
   "authors.nothing_left": "Authors: nothing left to look up.",
   "authors.looking_up": "Looking up {count} mod authors on Nexus...",
   "authors.progress": "Looking up mod authors on Nexus: {done}/{total}",
-  "authors.no_key": "Authors: no Nexus API key found. Log in to Nexus in MO2's settings (Nexus tab).",
-  "authors.failed": "Authors: lookup failed.",
-  "authors.rate_limited": "Nexus rate limit reached; looked up {done} of {total} authors. The rest next time.",
-  "authors.bad_key": "Nexus rejected the API key. Log in to Nexus again in MO2's settings.",
-  "authors.offline": "Could not reach Nexus Mods; authors will be looked up next time.",
-  "authors.quota": "Stopped to save Nexus API quota; looked up {done} of {total} authors.",
   "authors.done": "Looked up {count} mod authors on Nexus.",
-  "authors.done_failed": "Looked up {count} mod authors on Nexus. {failed} failed.",
+  "authors.failed_short": "Authors: lookup stopped after {done} of {total} mods.",
+  "authors.error_title": "Mod author lookup failed",
+  "authors.error_text": "Couldn't look up mod authors on Nexus Mods:\n{message}\n\nAuthors found so far are kept. You can try again later via right-click > Fetch all mod authors.",
+  "authors.error_rate_limited": "Nexus Mods is limiting requests right now (rate limit). Please try again later.",
+  "authors.error_http": "Nexus Mods returned an error (HTTP {code}).",
+  "authors.error_network": "Nexus Mods couldn't be reached. Check your internet connection.",
+  "authors.error_api": "Nexus Mods returned an unexpected response.",
+  "authors.error_unexpected": "An unexpected error occurred.",
 
   "run.nothing": "Nothing to do. Mark some textures for downscaling first.",
   "run.nothing_all_done": "Nothing to do. All {count} marked textures are already downscaled.",

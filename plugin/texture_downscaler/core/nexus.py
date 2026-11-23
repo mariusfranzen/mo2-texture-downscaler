@@ -1,13 +1,17 @@
-"""Look up mod uploaders on Nexus Mods, with a permanent on-disk cache.
+"""Look up mod uploaders on Nexus Mods via the public GraphQL API, with a permanent local cache.
 
-The API key is read from the Windows Credential Manager entry MO2 creates when the user logs in
-to Nexus (`ModOrganizer2_APIKEY`), or passed in explicitly. The key is never logged or stored.
+No API key or account is used: Nexus' GraphQL v2 endpoint serves public mod metadata without
+authentication. Only (game domain, mod ID) pairs are sent.
+
+Measured against the live API (601 mod pages): `legacyModsByDomain` accepts a long id list but
+returns at most 80 results per response, and offset paging over a long list is unreliable (results
+went missing). So ids are sent in chunks of BATCH_SIZE (< 80) and each chunk is read in one go. If a
+response still comes back short (totalCount > returned), the chunk is split in half and retried.
 """
 
 from __future__ import annotations
 
 import json
-import sys
 import threading
 import time
 import urllib.error
@@ -19,19 +23,20 @@ from pathlib import Path
 from .. import __version__
 from .i18n import tr
 
-# Switched off for public releases until the app is registered with Nexus Mods: their API
-# Acceptable Use Policy doesn't allow personal API keys (or keys issued to another app, such as
-# MO2's) in public-facing applications. With this False, nothing is ever sent to Nexus and the
-# Author column, its settings and its menu entries are hidden. Re-enable together with SSO login
-# using the slug Nexus issues on registration.
-NEXUS_ENABLED = False
+NEXUS_ENABLED = True  # master switch for the Author column / any Nexus traffic
 
-API_URL = "https://api.nexusmods.com/v1/games/{game}/mods/{mod_id}.json"
-MO2_CREDENTIAL = "ModOrganizer2_APIKEY"
+GRAPHQL_URL = "https://api.nexusmods.com/v2/graphql"
 APP_NAME = "Texture Downscaler (MO2 plugin)"
 UNKNOWN = "Unknown"
-MIN_HOURLY_REMAINING = 50  # leave some quota for MO2's own update checks
 CACHE_VERSION = 1
+BATCH_SIZE = 50  # the API returns at most 80 results per response
+
+QUERY = """query Uploaders($ids: [CompositeDomainWithIdInput!]!, $count: Int) {
+  legacyModsByDomain(ids: $ids, count: $count) {
+    totalCount
+    nodes { modId game { domainName } uploader { name } }
+  }
+}"""
 
 # meta.ini gameName -> Nexus domain, for when MO2 can't tell us.
 GAME_DOMAINS = {
@@ -56,54 +61,6 @@ class NexusRef:
 
 def game_domain(game_name: str) -> str | None:
     return GAME_DOMAINS.get(game_name.strip().lower().replace(" ", ""))
-
-
-def read_mo2_api_key() -> str | None:
-    """Read the Nexus API key MO2 stored in the Windows Credential Manager."""
-    if sys.platform != "win32":
-        return None
-    import ctypes
-    from ctypes import wintypes
-
-    class CREDENTIAL(ctypes.Structure):
-        _fields_ = [
-            ("Flags", wintypes.DWORD),
-            ("Type", wintypes.DWORD),
-            ("TargetName", wintypes.LPWSTR),
-            ("Comment", wintypes.LPWSTR),
-            ("LastWritten", wintypes.FILETIME),
-            ("CredentialBlobSize", wintypes.DWORD),
-            ("CredentialBlob", ctypes.POINTER(ctypes.c_ubyte)),
-            ("Persist", wintypes.DWORD),
-            ("AttributeCount", wintypes.DWORD),
-            ("Attributes", ctypes.c_void_p),
-            ("TargetAlias", wintypes.LPWSTR),
-            ("UserName", wintypes.LPWSTR),
-        ]
-
-    advapi = ctypes.WinDLL("advapi32", use_last_error=True)
-    cred_ptr = ctypes.POINTER(CREDENTIAL)()
-    CRED_TYPE_GENERIC = 1
-    if not advapi.CredReadW(MO2_CREDENTIAL, CRED_TYPE_GENERIC, 0, ctypes.byref(cred_ptr)):
-        return None
-    try:
-        cred = cred_ptr.contents
-        blob = ctypes.string_at(cred.CredentialBlob, cred.CredentialBlobSize)
-    finally:
-        advapi.CredFree(cred_ptr)
-    return _decode_key(blob)
-
-
-def _decode_key(blob: bytes) -> str | None:
-    # MO2 writes the key as UTF-16; fall back to UTF-8 just in case.
-    for encoding in ("utf-16-le", "utf-8"):
-        try:
-            key = blob.decode(encoding).strip("\x00 \r\n")
-        except UnicodeDecodeError:
-            continue
-        if key and key.isascii() and key.isprintable():
-            return key
-    return None
 
 
 class AuthorCache:
@@ -146,20 +103,34 @@ class AuthorCache:
             pass
 
 
-class RateLimited(Exception):
-    pass
+class NexusError(Exception):
+    """A lookup failed; the message is shown to the user, `details` in the popup's details."""
+
+    def __init__(self, message: str, details: str = ""):
+        super().__init__(message)
+        self.details = details
 
 
-class AuthError(Exception):
-    pass
+class Truncated(Exception):
+    """Nexus returned fewer results than it found (a per-response limit)."""
 
 
-def fetch_uploader(ref: NexusRef, api_key: str, timeout: float = 15.0) -> tuple[str, int | None]:
-    """Return (uploaded_by, hourly requests remaining). uploaded_by is "" if the mod is unavailable."""
+def fetch_uploaders(refs: list[NexusRef], timeout: float = 30.0) -> dict[str, str]:
+    """One GraphQL request. Returns ref.key -> uploader for the mods Nexus knows.
+
+    Mods Nexus doesn't return (deleted, hidden, wrong id) are simply absent.
+    Raises NexusError on HTTP/API errors and Truncated if the response was cut short.
+    """
+    payload = {
+        "query": QUERY,
+        "variables": {"ids": [{"gameDomain": r.game, "modId": r.mod_id} for r in refs], "count": len(refs)},
+    }
     request = urllib.request.Request(
-        API_URL.format(game=ref.game, mod_id=ref.mod_id),
+        GRAPHQL_URL,
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
         headers={
-            "apikey": api_key,
+            "Content-Type": "application/json",
             "Accept": "application/json",
             "Application-Name": APP_NAME,
             "Application-Version": __version__,
@@ -168,67 +139,80 @@ def fetch_uploader(ref: NexusRef, api_key: str, timeout: float = 15.0) -> tuple[
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            remaining = _int_or_none(response.headers.get("x-rl-hourly-remaining"))
-            data = json.loads(response.read().decode("utf-8"))
+            body = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
+        try:
+            text = e.read().decode("utf-8", errors="replace")[:2000]
+        except Exception:
+            text = ""
         if e.code == 429:
-            raise RateLimited() from None
-        if e.code in (401, 403):
-            raise AuthError() from None
-        if e.code in (404, 410):
-            return "", _int_or_none(e.headers.get("x-rl-hourly-remaining"))
-        raise
-    uploader = data.get("uploaded_by") or (data.get("user") or {}).get("name") or ""
-    return str(uploader), remaining
+            raise NexusError(tr("authors.error_rate_limited"), f"HTTP 429\n{text}") from None
+        raise NexusError(tr("authors.error_http", code=e.code), text) from None
+    except (OSError, ValueError) as e:  # network down, timeout, invalid JSON
+        raise NexusError(tr("authors.error_network"), f"{type(e).__name__}: {e}") from None
 
-
-def _int_or_none(value) -> int | None:
+    if body.get("errors"):
+        raise NexusError(tr("authors.error_api"), json.dumps(body["errors"], indent=1)[:2000])
     try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
+        page = body["data"]["legacyModsByDomain"]
+        nodes = page["nodes"]
+        total = int(page.get("totalCount") or 0)
+        result = {
+            NexusRef(n["game"]["domainName"], int(n["modId"])).key: str(
+                (n.get("uploader") or {}).get("name") or ""
+            )
+            for n in nodes
+        }
+    except (KeyError, TypeError, ValueError) as e:
+        raise NexusError(tr("authors.error_api"), f"Unexpected response: {e!r}") from None
+    if total > len(nodes):
+        raise Truncated()
+    return result
 
 
 def fetch_missing(
     refs: list[NexusRef],
     cache: AuthorCache,
-    api_key: str,
     on_result: Callable[[NexusRef, str], None],
     cancelled: Callable[[], bool] = lambda: False,
-    delay: float = 0.1,
-    fetch: Callable[[NexusRef, str], tuple[str, int | None]] | None = None,
+    delay: float = 0.2,
+    batch_size: int | None = None,
+    fetch: Callable[[list[NexusRef]], dict[str, str]] | None = None,
 ) -> str:
-    """Fetch uploaders for refs not in the cache, one at a time. Returns a short status message."""
-    fetch = fetch or fetch_uploader
+    """Look up uploaders for refs not in the cache, in batches. Returns a short status message.
+
+    Raises NexusError (after saving what was found so far) when a batch fails, so the caller can
+    tell the user instead of failing silently.
+    """
+    fetch = fetch or (lambda batch: fetch_uploaders(batch))
+    batch_size = batch_size or BATCH_SIZE
     todo = [r for r in dict.fromkeys(refs) if cache.get(r) is None]
+    pending = [todo[i : i + batch_size] for i in range(0, len(todo), batch_size)]
     done = 0
-    errors = 0
-    for ref in todo:
-        if cancelled():
-            break
-        try:
-            author, remaining = fetch(ref, api_key)
-        except RateLimited:
-            return tr("authors.rate_limited", done=done, total=len(todo))
-        except AuthError:
-            return tr("authors.bad_key")
-        except (OSError, ValueError):  # network down, timeouts, bad JSON
-            errors += 1
-            if errors >= 5 and done == 0:
-                return tr("authors.offline")
-            continue
-        cache.put(ref, author)
-        on_result(ref, author)
-        done += 1
-        if done % 25 == 0:
-            cache.save()
-        if remaining is not None and remaining < MIN_HOURLY_REMAINING:
-            cache.save()
-            return tr("authors.quota", done=done, total=len(todo))
-        time.sleep(delay)
-    cache.save()
+    try:
+        while pending:
+            if cancelled():
+                break
+            batch = pending.pop(0)
+            try:
+                found = fetch(batch)
+            except Truncated:
+                if len(batch) == 1:
+                    raise NexusError(
+                        tr("authors.error_api"), "Nexus returned an incomplete result."
+                    ) from None
+                half = len(batch) // 2
+                pending[:0] = [batch[:half], batch[half:]]  # smaller requests, same order
+                continue
+            for ref in batch:
+                author = found.get(ref.key, "")  # not returned: not on Nexus (anymore) / hidden
+                cache.put(ref, author)
+                on_result(ref, author)
+                done += 1
+            if pending:
+                time.sleep(delay)
+    finally:
+        cache.save()
     if not todo:
         return ""
-    if errors:
-        return tr("authors.done_failed", count=done, failed=errors)
     return tr("authors.done", count=done)

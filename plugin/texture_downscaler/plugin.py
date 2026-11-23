@@ -15,7 +15,7 @@ from . import ICON_PATH, __version__
 from .core import i18n
 from .core.downscaler import TEXCONV_PATH, default_workers
 from .core.i18n import tr
-from .core.nexus import NEXUS_ENABLED, NexusRef, game_domain, read_mo2_api_key
+from .core.nexus import NEXUS_ENABLED, NexusRef, game_domain
 from .core.output import Manifest, RunMode
 from .core.scanner import LooseModSource, TextureSource
 from .ui.main_dialog import MainDialog
@@ -28,7 +28,6 @@ class TextureDownscalerTool(mobase.IPluginTool):
         super().__init__()
         self._organizer: mobase.IOrganizer | None = None
         self._output_created = False
-        self._manual_api_key: str | None = None
 
     # ---- IPlugin ---------------------------------------------------------------------------
 
@@ -83,7 +82,6 @@ class TextureDownscalerTool(mobase.IPluginTool):
         return [
             mobase.PluginSetting("author_lookup", tr("setting.author_lookup"), "ask"),
             mobase.PluginSetting("hidden_authors", tr("setting.hidden_authors"), "[]"),
-            mobase.PluginSetting("nexus_api_key", tr("setting.nexus_api_key"), ""),
         ]
 
     def requirements(self):
@@ -144,16 +142,11 @@ class TextureDownscalerTool(mobase.IPluginTool):
         """Dialog arguments for the Nexus author column; everything off while NEXUS_ENABLED is False."""
         if not NEXUS_ENABLED:
             return {"authors_enabled": False}
-        # Read on the main thread; the lookup thread must not call into MO2.
-        self._manual_api_key = (
-            str(self._organizer.pluginSetting(self.name(), "nexus_api_key") or "").strip() or None
-        )
         mod_refs = self._nexus_refs([s.name for s in sources])
         return {
             "auto_fetch_authors": self._author_lookup_enabled(mod_refs),
             "mod_refs": mod_refs,
             "author_cache_path": self._cache_path().with_name("nexus_authors.json"),
-            "api_key_provider": self._api_key,
             "hidden_authors": set(self._load_json_setting("hidden_authors", list)),
             "on_hidden_authors_changed": lambda authors: self._save_json_setting(
                 "hidden_authors", sorted(authors, key=str.lower)
@@ -238,7 +231,9 @@ class TextureDownscalerTool(mobase.IPluginTool):
             return False
         pages = len({r.key for r in mod_refs.values() if r is not None})
         answer = QMessageBox.question(
-            self._parentWidget(), tr("authors_prompt.title"), tr("authors_prompt.text", count=pages)
+            self._parentWidget(),
+            tr("authors_prompt.title"),
+            tr("authors_prompt.text", pages=tr("count.mod_pages", count=pages)),
         )
         enabled = answer == QMessageBox.StandardButton.Yes
         self._organizer.setPluginSetting(self.name(), "author_lookup", "yes" if enabled else "no")
@@ -273,10 +268,6 @@ class TextureDownscalerTool(mobase.IPluginTool):
         except Exception:
             pass
         return game_domain(game_name)
-
-    def _api_key(self) -> str | None:
-        """Called from the lookup thread. A key in the plugin settings wins over MO2's stored key."""
-        return self._manual_api_key or read_mo2_api_key()
 
     def _ensure_output_mod(self, output_name: str) -> Path | None:
         """Return the output mod folder, creating the mod (enabled, last priority) if needed."""

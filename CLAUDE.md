@@ -43,7 +43,7 @@ plugin/texture_downscaler/      # the MO2 plugin package (copied/linked into <MO
     dds.py                      # DDS header parsing (legacy FourCC + DX10), no pixel decoding
     texture_types.py            # classify by suffix: _n/_msn normal, _s/_m/_em spec, _g glow, ...
     scanner.py                  # TextureSource protocol, LooseModSource, scan() -> TextureEntry
-    nexus.py                    # Nexus uploader lookup + cache, MO2 API key from Credential Manager
+    nexus.py                    # Nexus uploader lookup via public GraphQL (no key) + cache
     header_cache.py             # persistent DDS header cache (path + size + mtime)
     downscaler.py               # target size math, texconv command/job runner (thread pool)
     i18n.py                     # tr(): JSON string lookup, English fallback, plural rules
@@ -89,21 +89,23 @@ assets/logo.png                 # 2048px logo (README header); the plugin ships 
   so deleted files drop out.
 - **Persisted UI state** (plugin settings, JSON): `hidden_mods`, `sort_state` (primary column and
   direction, secondary column and direction). Restoring state must not trigger a save.
-- **Nexus features are switched OFF** (`NEXUS_ENABLED = False` in `core/nexus.py`, since 1.0.1). The
-  Nexus API Acceptable Use Policy forbids personal API keys (and, by extension, MO2's SSO key) in
-  public-facing apps. The app must be registered with Nexus (support@nexusmods.com) and use SSO with
-  the slug Nexus issues. While the flag is off, the dialog gets `authors_enabled=False`: the Author
-  column is hidden, nothing is sent to Nexus, and the Nexus plugin settings and menu entries are gone.
-  The code below stays so it can be re-enabled after registration. Keep `NEXUS_ENABLED` False in any
-  release until then (a test enforces this).
-- **Author column** = the Nexus `uploaded_by` account name (agreed with the user, rather than the
-  free-text `author` field). MO2 doesn't store authors, so `core/nexus.py` looks them up via
-  `GET /v1/games/{domain}/mods/{id}.json` one at a time in `AuthorWorker` (about 0.2 s each).
-  - Results are cached permanently in `plugins/data/texture_downscaler/nexus_authors.json`;
-    `""` means looked up but not on Nexus.
-  - API key: the plugin setting `nexus_api_key` if set, otherwise MO2's own key read from Windows
-    Credential Manager (`ModOrganizer2_APIKEY`, UTF-16). Never log or store the key.
-  - Stops on 429, on 401/403, or when the hourly quota left drops below 50.
+- **Author column** = the Nexus uploader's account name (agreed with the user, rather than the
+  free-text `author` field). MO2 doesn't store authors, so `core/nexus.py` looks them up via the
+  public **GraphQL v2** API (`https://api.nexusmods.com/v2/graphql`, `legacyModsByDomain` query)
+  **without any API key or login**. Nexus support pointed us there, since we only read metadata; the
+  user decided no registration is needed. Never add API keys, Credential Manager reads or
+  `apikey`/`Authorization` headers back (a test asserts none are sent).
+  - Measured on the live API: one request takes a long id list but returns at most **80** results,
+    and offset paging over a long list lost results. So ids go in chunks of `BATCH_SIZE` = 50, each
+    read in one go. If `totalCount` > returned, the chunk is split in half and retried.
+    601 pages: 13 requests, about 5 s.
+  - Mods missing from a response (deleted, hidden, wrong id) are cached as `""` and shown as
+    "Unknown". Adult-content mods are returned anonymously.
+  - Failures (HTTP, 429, network, GraphQL errors) raise `NexusError`. `AuthorWorker.failed` then shows
+    a warning popup with technical details, never failing silently; authors found so far are kept.
+  - Results are cached permanently in `plugins/data/texture_downscaler/nexus_authors.json`.
+  - `NEXUS_ENABLED` (in `core/nexus.py`) is the master switch. It's True. When False, the dialog gets
+    `authors_enabled=False`: the column is hidden and nothing is sent.
   - **Opt-in:** the plugin setting `author_lookup` (ask / yes / no) defaults to "ask". The first open
     asks once and saves the answer. "yes" fetches missing authors automatically; "no" doesn't.
     Either way the Author column stays visible: authors not looked up yet show "Unknown", and

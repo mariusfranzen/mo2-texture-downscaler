@@ -10,9 +10,9 @@ Your original mods are never modified. The downscaled textures go into a separat
 
 - **Scans every enabled mod**: about 60,000 textures across 700 mods in a few seconds (tested on my setup), and under a second on later opens thanks to a header cache.
 - **Only shows the textures the game actually loads.** When several mods provide the same texture, only the winning file (highest priority in MO2) is listed.
-- **A sortable, filterable table** with these columns: texture path, mod, type, resolution, format, file size, target size, estimated new size and status.
+- **A sortable, filterable table** with these columns: texture path, mod, author, type, resolution, format, file size, target size, estimated new size and status.
   - Filter by search text, mod, texture type, "hide textures smaller than…", only marked, and hide already downscaled.
-  - Hide whole mods via right-click. Hidden mods are remembered.
+  - Hide whole mods or authors via right-click. Hidden mods and authors are remembered.
 - **Bulk tools:**
   - *Basic* tab: mark the selected textures for downscaling to a size.
   - *Batch* tab: a size rule ("everything larger than 4K → 2K") and a maximum size per texture type (diffuse, normal, specular/mask, glow, parallax, environment).
@@ -42,7 +42,7 @@ The tool appears under the **Tools** menu (puzzle-piece icon) as **Texture Downs
 ## Usage
 
 1. Open **Tools → Texture Downscaler**. It scans your enabled mods and lists their textures, largest first.
-2. Narrow the list down with the filters, or hide mods you never want to touch.
+2. Narrow the list down with the filters, or hide mods and authors you never want to touch.
 3. Mark textures for downscaling:
    - **Basic tab:** select rows (Ctrl/Shift-click, Ctrl+A), pick a size, click **Mark for downscaling**.
    - **Batch tab:** apply a size rule or per-type limits to every texture currently shown.
@@ -78,6 +78,15 @@ The output mod contains a `texture_downscaler.json` file recording what was down
 
 To undo everything, disable or delete the **Texture Downscaler Output** mod. The tool only ever deletes files it wrote itself.
 
+## Mod authors (Nexus)
+
+MO2 doesn't store mod authors, so the *Author* column looks them up on Nexus Mods. It shows the uploader's account name.
+
+- The first time you open the tool, it asks whether to look up authors **automatically**.
+- Either way, you can right-click any texture (or the *Author* column header) and choose **Fetch author for N selected mods** or **Fetch all mod authors** at any time.
+- **No account, login or API key is needed.** The tool uses Nexus' public mod information and only sends the Nexus IDs of your mods. A typical setup with ~600 Nexus mods takes about 5 seconds once; results are cached and later only newly installed mods are looked up.
+- Mods that don't come from Nexus show as *Unknown*. If a lookup fails (e.g. no internet), you get a message, the authors found so far are kept, and you can retry later.
+
 ## Settings
 
 In MO2, go to **Settings → Plugins → Texture Downscaler**:
@@ -86,14 +95,14 @@ In MO2, go to **Settings → Plugins → Texture Downscaler**:
 |---|---|---|
 | `output_mod_name` | `Texture Downscaler Output` | Name of the mod that receives the downscaled textures |
 | `workers` | `0` | Number of parallel texconv processes (0 = automatic) |
+| `author_lookup` | `ask` | Look up mod authors on Nexus automatically: `ask`, `yes` or `no` |
 | `language` | *(empty)* | Interface language, e.g. `en`. Empty = MO2's language if a translation exists, otherwise English. Restart MO2 after changing it. |
-| `hidden_mods`, `sort_state` | | Remembered UI state, managed by the tool |
+| `hidden_mods`, `hidden_authors`, `sort_state` | | Remembered UI state, managed by the tool |
 
 Caches are stored in `<MO2>/plugins/data/texture_downscaler/`. You can safely delete them; they're rebuilt as needed.
 
 ## Limitations
 
-- No author column yet. It's planned once the tool is registered as an app with Nexus Mods.
 - Only **loose** textures are scanned. Textures inside BSA archives are not yet supported.
 - Textures in MO2's **Overwrite** folder aren't scanned. If a texture is in Overwrite, it also overrides the output mod.
 - Skyrim SE/AE only for now.
@@ -104,7 +113,7 @@ The plugin lives in `plugin/texture_downscaler/`:
 
 | Folder | Contents |
 |---|---|
-| `core/` | Plain Python, no MO2 or Qt dependencies: DDS parsing, scanning, texconv wrapper, output manifest, Nexus lookup (currently disabled) |
+| `core/` | Plain Python, no MO2 or Qt dependencies: DDS parsing, scanning, texconv wrapper, output manifest, Nexus author lookup |
 | `ui/` | PyQt6 dialog, table model and background workers |
 | `plugin.py` | The MO2 integration |
 

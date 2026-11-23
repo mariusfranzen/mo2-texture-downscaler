@@ -115,7 +115,6 @@ class MainDialog(QDialog):
         auto_fetch_authors: bool = True,
         mod_refs: dict[str, NexusRef | None] | None = None,
         author_cache_path: Path | None = None,
-        api_key_provider: Callable[[], str | None] | None = None,
         hidden_authors: Iterable[str] = (),
         on_hidden_authors_changed: Callable[[set[str]], None] | None = None,
         parent: QWidget | None = None,
@@ -144,7 +143,6 @@ class MainDialog(QDialog):
         self.on_hidden_authors_changed = on_hidden_authors_changed
         self.mod_refs = mod_refs or {}
         self.author_cache_path = author_cache_path
-        self.api_key_provider = api_key_provider
         self.auto_fetch_authors = auto_fetch_authors
         self.authors_enabled = authors_enabled
         self._author_queue: list[NexusRef] = []
@@ -762,7 +760,7 @@ class MainDialog(QDialog):
 
     def _add_fetch_actions(self, menu: QMenu, selected_mods: list[str]) -> None:
         """'Fetch author' entries; no-op entries are hidden rather than shown disabled."""
-        if not self.authors_enabled or self.api_key_provider is None or not self.mod_refs:
+        if not self.authors_enabled or not self.mod_refs:
             return
         selected = self._unfetched_refs(selected_mods)
         everything = self._unfetched_refs(None)
@@ -810,7 +808,7 @@ class MainDialog(QDialog):
     def fetch_authors(self, mods: list[str] | None, quiet: bool = False) -> None:
         """Look up uploaders on Nexus for `mods` (None = all mods) in the background."""
         refs = self._unfetched_refs(mods)
-        if not refs or self.api_key_provider is None:
+        if not refs:
             if not quiet:
                 self.author_label.setText(tr("authors.nothing_left"))
                 self.author_label.setVisible(True)
@@ -824,7 +822,8 @@ class MainDialog(QDialog):
         refs, self._author_queue = self._author_queue, []
         self.author_label.setText(tr("authors.looking_up", count=len(refs)))
         self.author_label.setVisible(True)
-        worker = AuthorWorker(refs, self._author_cache, self.api_key_provider, self)
+        worker = AuthorWorker(refs, self._author_cache, self)
+        worker.failed.connect(self._on_authors_failed)
         worker.found.connect(self._on_author_found)
         worker.progress.connect(
             lambda n, total: self.author_label.setText(tr("authors.progress", done=n, total=total))
@@ -833,6 +832,18 @@ class MainDialog(QDialog):
         self._author_timer.start()
         self.author_worker = worker
         worker.start()
+
+    def _on_authors_failed(self, message: str, details: str) -> None:
+        """Tell the user a lookup failed instead of failing silently (found authors are kept)."""
+        box = QMessageBox(
+            QMessageBox.Icon.Warning,
+            tr("authors.error_title"),
+            tr("authors.error_text", message=message),
+            parent=self,
+        )
+        if details:
+            box.setDetailedText(details)
+        box.open()  # non-blocking: the worker's finished signal still updates the status line
 
     def _on_author_found(self, ref_key: str, author: str) -> None:
         for mod in self._mods_by_ref.get(ref_key, []):
