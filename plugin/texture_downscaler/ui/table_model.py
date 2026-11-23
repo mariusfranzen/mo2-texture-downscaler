@@ -6,6 +6,7 @@ from PyQt6.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel
 from PyQt6.QtGui import QBrush, QColor, QFont
 
 from ..core.downscaler import estimated_size, target_size
+from ..core.i18n import tr
 from ..core.nexus import UNKNOWN
 from ..core.scanner import TextureEntry
 from ..core.texture_types import TextureType
@@ -26,6 +27,7 @@ TARGET_CHOICES: list[int] = [8192, 4096, 2048, 1024, 512, 256, 128]
     COL_NEW,
     COL_STATUS,
 ) = range(10)
+# Stable English column IDs (saved in the sort settings); shown to users via column_title().
 HEADERS = [
     "Texture",
     "Mod",
@@ -38,6 +40,34 @@ HEADERS = [
     "New size",
     "Status",
 ]
+_HEADER_KEYS = [
+    "column.texture",
+    "column.mod",
+    "column.author",
+    "column.type",
+    "column.resolution",
+    "column.format",
+    "column.size",
+    "column.target",
+    "column.new_size",
+    "column.status",
+]
+_TYPE_KEYS = {
+    TextureType.DIFFUSE: "type.diffuse",
+    TextureType.NORMAL: "type.normal",
+    TextureType.SPECULAR: "type.specular",
+    TextureType.GLOW: "type.glow",
+    TextureType.PARALLAX: "type.parallax",
+    TextureType.ENVIRONMENT: "type.environment",
+}
+
+
+def column_title(col: int) -> str:
+    return tr(_HEADER_KEYS[col])
+
+
+def type_name(ttype: TextureType) -> str:
+    return tr(_TYPE_KEYS[ttype])
 
 
 def fmt_bytes(n: float) -> str:
@@ -106,6 +136,11 @@ class TextureTableModel(QAbstractTableModel):
             return ""
         return self.mod_authors.get(e.mod, UNKNOWN)
 
+    def author_text(self, e: TextureEntry) -> str:
+        """Author as shown to the user (the UNKNOWN marker translated)."""
+        author = self.author(e)
+        return tr("table.author_unknown") if author == UNKNOWN else author
+
     def set_mod_authors(self, authors: dict[str, str]) -> None:
         self.mod_authors.update(authors)
         self.fetching_mods.difference_update(authors)
@@ -136,7 +171,7 @@ class TextureTableModel(QAbstractTableModel):
 
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
         if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
-            return HEADERS[section]
+            return column_title(section)
         return None
 
     def flags(self, index):
@@ -165,15 +200,15 @@ class TextureTableModel(QAbstractTableModel):
             if col == COL_PATH:
                 return f"{e.virtual_path}\n{e.abs_path}"
             if col == COL_MOD and e.provider_count > 1:
-                return f"Winning file. Provided by {e.provider_count} mods in total."
+                return tr("table.tip_winning_file", count=e.provider_count)
             if col == COL_AUTHOR:
                 if e.mod in self.fetching_mods:
-                    return "Looking up the uploader on Nexus Mods..."
+                    return tr("table.tip_author_fetching")
                 if e.mod not in self.mod_authors:
-                    return "Not looked up yet. Right-click > Fetch author to look it up on Nexus."
+                    return tr("table.tip_author_not_fetched")
                 if self.mod_authors[e.mod] == UNKNOWN:
-                    return "Not a Nexus mod, or not found on Nexus"
-                return "Nexus uploader"
+                    return tr("table.tip_author_unknown")
+                return tr("table.tip_author")
         if role == Qt.ItemDataRole.TextAlignmentRole and col in (COL_RES, COL_SIZE, COL_TARGET, COL_NEW):
             return int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         return None
@@ -190,9 +225,9 @@ class TextureTableModel(QAbstractTableModel):
         if col == COL_MOD:
             return e.mod
         if col == COL_AUTHOR:
-            return "..." if e.mod in self.fetching_mods else self.author(e)
+            return "..." if e.mod in self.fetching_mods else self.author_text(e)
         if col == COL_TYPE:
-            return e.ttype.value
+            return type_name(e.ttype)
         if col == COL_RES:
             return f"{e.info.width} x {e.info.height}"
         if col == COL_FORMAT:
@@ -201,7 +236,7 @@ class TextureTableModel(QAbstractTableModel):
             return fmt_bytes(e.size)
         if col == COL_TARGET:
             if e.target is None:
-                return "-"
+                return tr("table.keep")
             w, h = target_size(e.info, e.target)
             return f"{w} x {h}"
         if col == COL_NEW:
@@ -280,7 +315,7 @@ class TextureFilterProxy(QSortFilterProxyModel):
         if self.hide_done and e.done_target is not None and e.target == e.done_target:
             return False
         if self.text_terms:
-            haystack = f"{e.key} {e.mod.lower()} {model.author(e).lower()}"
+            haystack = f"{e.key} {e.mod.lower()} {model.author_text(e).lower()}"
             if not all(t in haystack for t in self.text_terms):
                 return False
         return True

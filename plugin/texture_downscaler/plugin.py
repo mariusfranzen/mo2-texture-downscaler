@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import configparser
 import json
 from pathlib import Path
 
 import mobase
+from PyQt6.QtCore import QLocale
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QMessageBox
 
 from . import ICON_PATH, __version__
+from .core import i18n
 from .core.downscaler import TEXCONV_PATH, default_workers
+from .core.i18n import tr
 from .core.nexus import NEXUS_ENABLED, NexusRef, game_domain, read_mo2_api_key
 from .core.output import Manifest, RunMode
 from .core.scanner import LooseModSource, TextureSource
@@ -30,7 +34,28 @@ class TextureDownscalerTool(mobase.IPluginTool):
 
     def init(self, organizer: mobase.IOrganizer) -> bool:
         self._organizer = organizer
+        self._load_language()
         return True
+
+    def _load_language(self) -> None:
+        """Language: the `language` setting, else MO2's interface language, else Windows', else English."""
+        try:
+            setting = str(self._organizer.pluginSetting(self.name(), "language") or "")
+        except Exception:
+            setting = ""
+        candidates: list[str] = []
+        try:
+            ini = configparser.ConfigParser(interpolation=None, strict=False)
+            ini.read(Path(self._organizer.basePath()) / "ModOrganizer.ini", encoding="utf-8")
+            if mo2_language := ini.get("Settings", "language", fallback=""):
+                candidates.append(mo2_language)
+        except Exception:
+            pass
+        try:
+            candidates.extend(QLocale.system().uiLanguages())
+        except Exception:
+            pass
+        i18n.load(i18n.resolve_language(setting, candidates))
 
     def name(self) -> str:
         return "Texture Downscaler"
@@ -39,10 +64,7 @@ class TextureDownscalerTool(mobase.IPluginTool):
         return "Bitbyte"
 
     def description(self) -> str:
-        return (
-            "Finds the highest-resolution textures in your enabled mods and downscales the ones "
-            "you choose into a separate output mod."
-        )
+        return tr("plugin.description")
 
     def version(self) -> mobase.VersionInfo:
         major, minor, patch = (int(x) for x in __version__.split("."))
@@ -50,27 +72,18 @@ class TextureDownscalerTool(mobase.IPluginTool):
 
     def settings(self) -> list[mobase.PluginSetting]:
         return [
-            mobase.PluginSetting(
-                "output_mod_name", "Name of the mod that receives downscaled textures", DEFAULT_OUTPUT_NAME
-            ),
-            mobase.PluginSetting("workers", "Parallel texconv processes (0 = automatic)", 0),
-            mobase.PluginSetting("hidden_mods", "Mods hidden in the texture list (JSON list)", "[]"),
-            mobase.PluginSetting("sort_state", "Table sort order (JSON)", "{}"),
+            mobase.PluginSetting("output_mod_name", tr("setting.output_mod_name"), DEFAULT_OUTPUT_NAME),
+            mobase.PluginSetting("workers", tr("setting.workers"), 0),
+            mobase.PluginSetting("language", tr("setting.language"), ""),
+            mobase.PluginSetting("hidden_mods", tr("setting.hidden_mods"), "[]"),
+            mobase.PluginSetting("sort_state", tr("setting.sort_state"), "{}"),
         ] + (self._nexus_settings() if NEXUS_ENABLED else [])
 
     def _nexus_settings(self) -> list[mobase.PluginSetting]:
         return [
-            mobase.PluginSetting(
-                "author_lookup",
-                "Look up mod authors on Nexus for the Author column: ask, yes or no",
-                "ask",
-            ),
-            mobase.PluginSetting("hidden_authors", "Authors hidden in the texture list (JSON list)", "[]"),
-            mobase.PluginSetting(
-                "nexus_api_key",
-                "Nexus API key for the Author column. Leave empty to use the key MO2 saved when you logged in to Nexus",
-                "",
-            ),
+            mobase.PluginSetting("author_lookup", tr("setting.author_lookup"), "ask"),
+            mobase.PluginSetting("hidden_authors", tr("setting.hidden_authors"), "[]"),
+            mobase.PluginSetting("nexus_api_key", tr("setting.nexus_api_key"), ""),
         ]
 
     def requirements(self):
@@ -82,7 +95,7 @@ class TextureDownscalerTool(mobase.IPluginTool):
         return "Texture Downscaler"
 
     def tooltip(self) -> str:
-        return "Find and downscale high-resolution textures"
+        return tr("plugin.tooltip")
 
     def icon(self) -> QIcon:
         return QIcon(str(ICON_PATH)) if ICON_PATH.is_file() else QIcon()
@@ -91,7 +104,9 @@ class TextureDownscalerTool(mobase.IPluginTool):
         org = self._organizer
         parent = self._parentWidget()
         if not TEXCONV_PATH.is_file():
-            QMessageBox.critical(parent, "Texture Downscaler", f"texconv.exe is missing:\n{TEXCONV_PATH}")
+            QMessageBox.critical(
+                parent, "Texture Downscaler", tr("plugin.texconv_missing", path=TEXCONV_PATH)
+            )
             return
 
         output_name = str(org.pluginSetting(self.name(), "output_mod_name") or DEFAULT_OUTPUT_NAME).strip()
@@ -184,16 +199,10 @@ class TextureDownscalerTool(mobase.IPluginTool):
         box = QMessageBox(self._parentWidget())
         box.setWindowTitle("Texture Downscaler")
         box.setIcon(QMessageBox.Icon.Question)
-        box.setText(
-            f"The output mod '{output_name}' already contains {len(manifest.entries)} downscaled textures "
-            "from a previous run.\n\nWhat do you want to do?"
-        )
-        box.setInformativeText(
-            "Keep: already downscaled textures are skipped and pre-selected with their previous target.\n"
-            "Rebuild: previous outputs are deleted and everything you select is downscaled again."
-        )
-        keep = box.addButton("Keep && skip already done", QMessageBox.ButtonRole.AcceptRole)
-        rebuild = box.addButton("Rebuild from scratch", QMessageBox.ButtonRole.DestructiveRole)
+        box.setText(tr("run_mode.text", count=len(manifest.entries), mod=output_name))
+        box.setInformativeText(tr("run_mode.info"))
+        keep = box.addButton(tr("run_mode.keep"), QMessageBox.ButtonRole.AcceptRole)
+        rebuild = box.addButton(tr("run_mode.rebuild"), QMessageBox.ButtonRole.DestructiveRole)
         box.addButton(QMessageBox.StandardButton.Cancel)
         box.setDefaultButton(keep)
         box.exec()
@@ -229,19 +238,7 @@ class TextureDownscalerTool(mobase.IPluginTool):
             return False
         pages = len({r.key for r in mod_refs.values() if r is not None})
         answer = QMessageBox.question(
-            self._parentWidget(),
-            "Texture Downscaler - mod authors",
-            "Do you want to look up the author of each mod automatically?\n\n"
-            "MO2 doesn't store mod authors, so the tool would look them up on Nexus Mods using the "
-            f"API key MO2 already has: one request per mod page ({pages} for your enabled mods), "
-            "done once in the background and then cached. Later, only newly installed mods are "
-            "looked up.\n\n"
-            "This shouldn't use any significant part of your Nexus API allowance: it is a small "
-            "fraction of the hourly limit, and the lookup pauses by itself if the allowance gets low "
-            "so MO2's update checks are not affected. Only Nexus mod IDs are sent.\n\n"
-            "If you choose No, authors show as Unknown. You can still right-click any texture (or the "
-            "Author column header) and choose Fetch author / Fetch all mod authors at any time. To change "
-            "the automatic lookup later: MO2 Settings > Plugins > Texture Downscaler > author_lookup.",
+            self._parentWidget(), tr("authors_prompt.title"), tr("authors_prompt.text", count=pages)
         )
         enabled = answer == QMessageBox.StandardButton.Yes
         self._organizer.setPluginSetting(self.name(), "author_lookup", "yes" if enabled else "no")
@@ -290,7 +287,9 @@ class TextureDownscalerTool(mobase.IPluginTool):
             mod = org.createMod(mobase.GuessedString(output_name))
             if mod is None:
                 QMessageBox.critical(
-                    self._parentWidget(), "Texture Downscaler", f"Could not create the mod '{output_name}'."
+                    self._parentWidget(),
+                    "Texture Downscaler",
+                    tr("plugin.create_mod_failed", mod=output_name),
                 )
                 return None
             # MO2 only lists the new mod after a refresh; that happens in _on_output_written.

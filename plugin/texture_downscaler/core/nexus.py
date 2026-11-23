@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .. import __version__
+from .i18n import tr
 
 # Switched off for public releases until the app is registered with Nexus Mods: their API
 # Acceptable Use Policy doesn't allow personal API keys (or keys issued to another app, such as
@@ -208,13 +209,13 @@ def fetch_missing(
         try:
             author, remaining = fetch(ref, api_key)
         except RateLimited:
-            return f"Nexus rate limit reached; looked up {done} of {len(todo)} authors. The rest next time."
+            return tr("authors.rate_limited", done=done, total=len(todo))
         except AuthError:
-            return "Nexus rejected the API key. Log in to Nexus again in MO2's settings."
+            return tr("authors.bad_key")
         except (OSError, ValueError):  # network down, timeouts, bad JSON
             errors += 1
             if errors >= 5 and done == 0:
-                return "Could not reach Nexus Mods; authors will be looked up next time."
+                return tr("authors.offline")
             continue
         cache.put(ref, author)
         on_result(ref, author)
@@ -223,9 +224,11 @@ def fetch_missing(
             cache.save()
         if remaining is not None and remaining < MIN_HOURLY_REMAINING:
             cache.save()
-            return f"Stopped to save Nexus API quota; looked up {done} of {len(todo)} authors."
+            return tr("authors.quota", done=done, total=len(todo))
         time.sleep(delay)
     cache.save()
     if not todo:
         return ""
-    return f"Looked up {done} mod authors on Nexus." + (f" {errors} failed." if errors else "")
+    if errors:
+        return tr("authors.done_failed", count=done, failed=errors)
+    return tr("authors.done", count=done)

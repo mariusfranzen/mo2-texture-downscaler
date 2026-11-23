@@ -35,6 +35,7 @@ from PyQt6.QtWidgets import (
 from .. import ICON_PATH
 from ..core import output
 from ..core.downscaler import JobResult, estimated_size
+from ..core.i18n import tr
 from ..core.nexus import UNKNOWN, AuthorCache, NexusRef
 from ..core.output import Manifest, RunMode
 from ..core.scanner import TextureEntry, TextureSource
@@ -52,8 +53,10 @@ from .table_model import (
     TARGET_CHOICES,
     TextureFilterProxy,
     TextureTableModel,
+    column_title,
     fmt_bytes,
     fmt_dim,
+    type_name,
 )
 from .workers import AuthorWorker, DownscaleWorker, ScanWorker
 
@@ -78,7 +81,7 @@ class TargetDelegate(QStyledItemDelegate):
     def createEditor(self, parent, option, index):
         entry: TextureEntry = index.data(ENTRY_ROLE)
         combo = QComboBox(parent)
-        combo.addItem("- keep original size", None)
+        combo.addItem(tr("editor.keep"), None)
         for c in TARGET_CHOICES:
             if c < entry.max_dim:
                 combo.addItem(fmt_dim(c), c)
@@ -175,27 +178,27 @@ class MainDialog(QDialog):
 
         # --- scan status line
         status_row = QHBoxLayout()
-        self.scan_label = QLabel("Scanning...")
+        self.scan_label = QLabel(tr("scan.scanning", count=len(self.sources)))
         self.scan_bar = QProgressBar()
         self.scan_bar.setMaximumWidth(300)
         self.author_label = QLabel()
         self.author_label.setVisible(False)
-        self.rescan_btn = QPushButton("Rescan")
+        self.rescan_btn = QPushButton(tr("scan.rescan"))
         self.rescan_btn.clicked.connect(self._start_scan)
         status_row.addWidget(self.scan_label, 1)
         status_row.addWidget(self.scan_bar)
         status_row.addWidget(self.author_label)
-        status_row.addWidget(QLabel("Sort: click a column header, then by:"))
+        status_row.addWidget(QLabel(tr("sort.label")))
         self.secondary_combo = QComboBox()
-        self.secondary_combo.addItem("(nothing)", None)
-        for col, name in enumerate(HEADERS):
+        self.secondary_combo.addItem(tr("sort.nothing"), None)
+        for col in range(len(HEADERS)):
             if col != COL_AUTHOR or self.authors_enabled:
-                self.secondary_combo.addItem(name, col)
-        self.secondary_combo.setToolTip("Secondary sort column. Tip: Ctrl+click a column header to set it.")
+                self.secondary_combo.addItem(column_title(col), col)
+        self.secondary_combo.setToolTip(tr("sort.tip_secondary"))
         self.secondary_order = QPushButton()
         self.secondary_order.setCheckable(True)
         self.secondary_order.setFixedWidth(110)
-        self.secondary_order.setToolTip("Direction of the secondary sort")
+        self.secondary_order.setToolTip(tr("sort.tip_direction"))
         self.secondary_combo.currentIndexChanged.connect(self._apply_secondary_sort)
         self.secondary_order.toggled.connect(self._apply_secondary_sort)
         status_row.addWidget(self.secondary_combo)
@@ -204,45 +207,42 @@ class MainDialog(QDialog):
         root.addLayout(status_row)
 
         if self.mode is RunMode.REBUILD and self.manifest.entries:
-            warn = QLabel(
-                f"<b>Rebuild from scratch:</b> the {len(self.manifest.entries)} textures previously written to "
-                f"'{self.output_name}' will be deleted when you click Downscale."
-            )
+            warn = QLabel(tr("rebuild_warning", count=len(self.manifest.entries), mod=self.output_name))
             warn.setWordWrap(True)
             root.addWidget(warn)
 
         # --- filters
         filters = QHBoxLayout()
         self.search = QLineEdit()
-        self.search.setPlaceholderText("Filter by path or mod (space-separated terms)...")
+        self.search.setPlaceholderText(tr("filter.search"))
         self.search.setClearButtonEnabled(True)
         self.mod_combo = QComboBox()
         self.mod_combo.setMinimumWidth(220)
-        self.mod_combo.addItem("All mods", None)
+        self.mod_combo.addItem(tr("filter.all_mods"), None)
         self.type_combo = QComboBox()
-        self.type_combo.addItem("All types", None)
+        self.type_combo.addItem(tr("filter.all_types"), None)
         for t in TextureType:
-            self.type_combo.addItem(t.value, t)
+            self.type_combo.addItem(type_name(t), t)
         self.hide_combo = QComboBox()
         for d in HIDE_SMALLER_CHOICES:
-            self.hide_combo.addItem("Show all sizes" if d == 0 else f"Hide smaller than {fmt_dim(d)}", d)
+            self.hide_combo.addItem(
+                tr("filter.all_sizes") if d == 0 else tr("filter.hide_smaller", size=fmt_dim(d)), d
+            )
         self.hide_combo.setCurrentIndex(self.hide_combo.findData(2048))
-        self.only_marked = QCheckBox("Only marked")
-        self.only_marked.setToolTip("Show only textures marked for downscaling")
-        self.hide_done = QCheckBox("Hide already downscaled")
-        self.hide_done.setToolTip(
-            "Hide textures that were already downscaled to the size they are marked for"
-        )
+        self.only_marked = QCheckBox(tr("filter.only_marked"))
+        self.only_marked.setToolTip(tr("filter.tip_only_marked"))
+        self.hide_done = QCheckBox(tr("filter.hide_done"))
+        self.hide_done.setToolTip(tr("filter.tip_hide_done"))
         self.hidden_mods: set[str] = set(self._initial_hidden_mods)
         self.unhide_btn = QPushButton()
-        self.unhide_btn.setToolTip("Show all mods you hid via right-click again")
+        self.unhide_btn.setToolTip(tr("filter.tip_unhide"))
         self.unhide_btn.clicked.connect(self._unhide_all_mods)
         self.unhide_btn.setVisible(False)
 
         filters.addWidget(self.search, 3)
-        filters.addWidget(QLabel("Mod:"))
+        filters.addWidget(QLabel(tr("filter.mod")))
         filters.addWidget(self.mod_combo, 2)
-        filters.addWidget(QLabel("Type:"))
+        filters.addWidget(QLabel(tr("filter.type")))
         filters.addWidget(self.type_combo)
         filters.addWidget(self.hide_combo)
         filters.addWidget(self.only_marked)
@@ -301,21 +301,21 @@ class MainDialog(QDialog):
         # --- bottom bar
         bottom = QHBoxLayout()
         self.summary = QLabel()
-        self.run_btn = QPushButton("Downscale marked textures...")
+        self.run_btn = QPushButton(tr("bottom.downscale_none"))
         self.run_btn.setDefault(True)
         self.run_btn.clicked.connect(self._run)
-        close_btn = QPushButton("Close")
+        close_btn = QPushButton(tr("bottom.close"))
         close_btn.clicked.connect(self.close)
         bottom.addWidget(self.summary, 1)
-        bottom.addWidget(QLabel(f"Output mod: <b>{self.output_name}</b>"))
+        bottom.addWidget(QLabel(tr("bottom.output_mod", mod=self.output_name)))
         bottom.addWidget(self.run_btn)
         bottom.addWidget(close_btn)
         root.addLayout(bottom)
 
     def _build_side_panel(self) -> QWidget:
         tabs = QTabWidget()
-        tabs.addTab(self._build_basic_tab(), "Basic")
-        tabs.addTab(self._build_batch_tab(), "Batch")
+        tabs.addTab(self._build_basic_tab(), tr("tab.basic"))
+        tabs.addTab(self._build_batch_tab(), tr("tab.batch"))
         tabs.setMinimumWidth(300)
         return tabs
 
@@ -323,36 +323,28 @@ class MainDialog(QDialog):
         page = QWidget()
         layout = QVBoxLayout(page)
 
-        steps = QLabel(
-            "<b>1.</b> Select textures in the table (Ctrl / Shift-click, Ctrl+A for all shown).<br>"
-            "<b>2.</b> Choose a size and click <b>Mark for downscaling</b>. Marked rows turn blue.<br>"
-            "<b>3.</b> Click <b>Downscale marked textures</b> at the bottom. Nothing is written until then."
-        )
+        steps = QLabel(tr("basic.steps"))
         steps.setWordWrap(True)
         layout.addWidget(steps)
 
-        box = QGroupBox("Selected textures")
+        box = QGroupBox(tr("basic.selected_box"))
         bl = QVBoxLayout(box)
-        self.selection_label = QLabel("No textures selected.")
+        self.selection_label = QLabel(tr("basic.none_selected"))
         self.selection_label.setWordWrap(True)
         bl.addWidget(self.selection_label)
         form = QFormLayout()
         self.sel_target = _size_combo(TARGET_CHOICES, default=2048)
-        form.addRow("Downscale to:", self.sel_target)
+        form.addRow(tr("basic.downscale_to"), self.sel_target)
         bl.addLayout(form)
-        mark_btn = QPushButton("Mark for downscaling")
+        mark_btn = QPushButton(tr("basic.mark"))
         mark_btn.clicked.connect(lambda: self._set_selected(self.sel_target.currentData()))
         bl.addWidget(mark_btn)
-        keep_btn = QPushButton("Unmark (keep original size)")
+        keep_btn = QPushButton(tr("basic.unmark"))
         keep_btn.clicked.connect(lambda: self._set_selected(None))
         bl.addWidget(keep_btn)
         layout.addWidget(box)
 
-        tip = QLabel(
-            "Tips: double-click a <i>Downscale to</i> cell to change one texture. Right-click rows to hide a mod, "
-            "deselect a texture type, or filter to a mod/folder. Textures already at or below the "
-            "chosen size are left alone."
-        )
+        tip = QLabel(tr("basic.tips"))
         tip.setWordWrap(True)
         layout.addWidget(tip)
         layout.addStretch(1)
@@ -362,39 +354,36 @@ class MainDialog(QDialog):
         page = QWidget()
         layout = QVBoxLayout(page)
 
-        hint = QLabel(
-            "Batch actions apply to <b>all textures currently shown</b> by the filters, not only the "
-            "selected ones. Use the Mod / Type / search filters or hide mods to narrow them down."
-        )
+        hint = QLabel(tr("batch.hint"))
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
         # Size rule
-        rule_box = QGroupBox("Size rule")
+        rule_box = QGroupBox(tr("batch.size_rule"))
         rule = QFormLayout(rule_box)
         self.rule_above = _size_combo(TARGET_CHOICES, default=2048)
         self.rule_target = _size_combo(TARGET_CHOICES, default=2048)
-        rule.addRow("Textures larger than:", self.rule_above)
-        rule.addRow("Downscale to:", self.rule_target)
-        btn = QPushButton("Mark shown for downscaling")
+        rule.addRow(tr("batch.larger_than"), self.rule_above)
+        rule.addRow(tr("basic.downscale_to"), self.rule_target)
+        btn = QPushButton(tr("batch.mark_shown"))
         btn.clicked.connect(self._apply_size_rule)
         rule.addRow(btn)
         layout.addWidget(rule_box)
 
         # Per type limits
-        type_box = QGroupBox("Max size per texture type")
+        type_box = QGroupBox(tr("batch.type_limits"))
         tf = QFormLayout(type_box)
         self.type_limit_combos: dict[TextureType, QComboBox] = {}
         for t in TextureType:
-            combo = _size_combo(TARGET_CHOICES, none_label="No limit")
+            combo = _size_combo(TARGET_CHOICES, none_label=tr("batch.no_limit"))
             self.type_limit_combos[t] = combo
-            tf.addRow(f"{t.value}:", combo)
-        btn = QPushButton("Mark shown for downscaling")
+            tf.addRow(f"{type_name(t)}:", combo)
+        btn = QPushButton(tr("batch.mark_shown"))
         btn.clicked.connect(self._apply_type_limits)
         tf.addRow(btn)
         layout.addWidget(type_box)
 
-        clear_btn = QPushButton("Unmark all shown (keep original size)")
+        clear_btn = QPushButton(tr("batch.unmark_shown"))
         clear_btn.clicked.connect(lambda: self._set_rows(self._visible_rows(), None))
         layout.addWidget(clear_btn)
         layout.addStretch(1)
@@ -403,21 +392,26 @@ class MainDialog(QDialog):
     def _update_selection_label(self, *_args) -> None:
         rows = self._selected_rows()
         if not rows:
-            self.selection_label.setText("No textures selected.")
+            self.selection_label.setText(tr("basic.none_selected"))
             return
         entries = [self.model.entries[r] for r in rows]
         mods = {e.mod for e in entries}
         marked = sum(e.target is not None for e in entries)
         self.selection_label.setText(
-            f"<b>{len(rows)}</b> selected from {len(mods)} mod{'s' if len(mods) != 1 else ''}"
-            f" ({marked} already marked), {fmt_bytes(sum(e.size for e in entries))}."
+            tr(
+                "basic.selection",
+                count=len(rows),
+                mods=tr("count.mods", count=len(mods)),
+                marked=marked,
+                size=fmt_bytes(sum(e.size for e in entries)),
+            )
         )
 
     # ============================================================================= sorting ====
 
     def _apply_secondary_sort(self, *_args) -> None:
         desc = self.secondary_order.isChecked()
-        self.secondary_order.setText("Descending ▼" if desc else "Ascending ▲")
+        self.secondary_order.setText(tr("sort.descending") if desc else tr("sort.ascending"))
         self.proxy.set_secondary_sort(self.secondary_combo.currentData(), desc)
         self._save_sort()
 
@@ -437,7 +431,7 @@ class MainDialog(QDialog):
         self.secondary_combo.blockSignals(False)
         self.secondary_order.blockSignals(False)
         desc = self.secondary_order.isChecked()
-        self.secondary_order.setText("Descending ▼" if desc else "Ascending ▲")
+        self.secondary_order.setText(tr("sort.descending") if desc else tr("sort.ascending"))
         self.proxy.secondary_col, self.proxy.secondary_desc = sec, desc
         order = Qt.SortOrder.DescendingOrder if state.get("descending", True) else Qt.SortOrder.AscendingOrder
         self.table.sortByColumn(col, order)
@@ -488,7 +482,7 @@ class MainDialog(QDialog):
         self.run_btn.setEnabled(False)
         self.scan_bar.setVisible(True)
         self.scan_bar.setRange(0, 0)
-        self.scan_label.setText(f"Scanning {len(self.sources)} enabled mods...")
+        self.scan_label.setText(tr("scan.scanning", count=len(self.sources)))
         self.model.set_entries([])
         worker = ScanWorker(self.sources, self.header_cache_path, self)
         worker.progress.connect(self._on_scan_progress)
@@ -513,7 +507,7 @@ class MainDialog(QDialog):
         current_mod = self.mod_combo.currentData()
         self.mod_combo.blockSignals(True)
         self.mod_combo.clear()
-        self.mod_combo.addItem("All mods", None)
+        self.mod_combo.addItem(tr("filter.all_mods"), None)
         for mod in sorted({e.mod for e in entries}, key=str.lower):
             self.mod_combo.addItem(mod, mod)
         self.mod_combo.setCurrentIndex(max(0, self.mod_combo.findData(current_mod)))
@@ -524,14 +518,18 @@ class MainDialog(QDialog):
         self.rescan_btn.setEnabled(True)
         self.run_btn.setEnabled(True)
         self.scan_label.setText(
-            f"Found {len(entries)} textures (winning files only) in {len(self.sources)} enabled mods."
+            tr(
+                "scan.found",
+                textures=tr("count.textures", count=len(entries)),
+                mods=tr("count.enabled_mods", count=len(self.sources)),
+            )
         )
 
     def _on_scan_failed(self, tb: str) -> None:
         self.scan_bar.setVisible(False)
         self.rescan_btn.setEnabled(True)
-        self.scan_label.setText("Scan failed.")
-        QMessageBox.critical(self, "Scan failed", tb)
+        self.scan_label.setText(tr("scan.failed"))
+        QMessageBox.critical(self, tr("scan.failed_title"), tb)
 
     # ============================================================================ filters ====
 
@@ -559,23 +557,18 @@ class MainDialog(QDialog):
         marked = [e for e in entries if e.target is not None]
         before = sum(e.size for e in marked)
         after = sum(estimated_size(e.size, e.info, e.target) for e in marked)
-        text = f"Showing {self.proxy.rowCount()} of {len(entries)} textures  |  {len(marked)} marked"
+        text = tr("summary.showing", shown=self.proxy.rowCount(), total=len(entries), marked=len(marked))
         if marked:
-            text += (
-                f"  |  VRAM if all loaded: {fmt_bytes(before)} -> ~{fmt_bytes(after)}"
-                f" (-{fmt_bytes(before - after)})  |  output mod adds ~{fmt_bytes(after)} on disk"
+            text += tr(
+                "summary.sizes",
+                before=fmt_bytes(before),
+                after=fmt_bytes(after),
+                saved=fmt_bytes(before - after),
             )
         self.summary.setText(text)
-        self.summary.setToolTip(
-            "VRAM: a compressed texture takes about as much video memory as its file size. The saving "
-            "is an upper bound - the game only loads textures for what is around you.\n"
-            "Disk: the original files stay in their mods; the downscaled copies are added to the "
-            "output mod, so disk usage goes up by the new size."
-        )
+        self.summary.setToolTip(tr("summary.tip"))
         self.run_btn.setText(
-            f"Downscale {len(marked)} marked texture{'s' if len(marked) != 1 else ''}..."
-            if marked
-            else "Downscale marked textures..."
+            tr("bottom.downscale", count=len(marked)) if marked else tr("bottom.downscale_none")
         )
 
     # ======================================================================= bulk actions ====
@@ -589,7 +582,7 @@ class MainDialog(QDialog):
     def _set_selected(self, target: int | None) -> None:
         rows = self._selected_rows()
         if not rows:
-            QMessageBox.information(self, "Nothing selected", "Select one or more rows in the table first.")
+            QMessageBox.information(self, tr("nothing_selected.title"), tr("nothing_selected.text"))
             return
         self._set_rows(rows, target)
 
@@ -598,7 +591,7 @@ class MainDialog(QDialog):
         rows = [r for r in self._visible_rows() if self.model.entries[r].max_dim > above]
         self._set_rows(rows, target)
         self.scan_label.setText(
-            f"Size rule: marked {len(rows)} shown textures larger than {fmt_dim(above)} for downscaling to {fmt_dim(target)}."
+            tr("batch.size_rule_done", count=len(rows), above=fmt_dim(above), target=fmt_dim(target))
         )
 
     def _apply_type_limits(self) -> None:
@@ -617,7 +610,7 @@ class MainDialog(QDialog):
         if self.only_marked.isChecked() or self.hide_done.isChecked():
             self._apply_filters()
         self._update_summary()
-        self.scan_label.setText(f"Type limits applied to {count} shown textures.")
+        self.scan_label.setText(tr("batch.type_limits_done", count=count))
 
     def _context_menu(self, pos) -> None:
         index: QModelIndex = self.table.indexAt(pos)
@@ -627,29 +620,31 @@ class MainDialog(QDialog):
         rows = self._selected_rows()
         menu = QMenu(self)
 
-        target_menu = menu.addMenu(f"Mark {len(rows)} selected for downscaling to")
+        target_menu = menu.addMenu(tr("menu.mark_selected", count=len(rows)))
         for c in TARGET_CHOICES:
             act = QAction(fmt_dim(c), target_menu)
             act.triggered.connect(lambda _=False, c=c: self._set_selected(c))
             target_menu.addAction(act)
-        menu.addAction("Unmark (keep original size)", lambda: self._set_selected(None))
+        menu.addAction(tr("menu.unmark"), lambda: self._set_selected(None))
         type_counts: dict[TextureType, int] = {}
         for r in rows:
             t = self.model.entries[r].ttype
             type_counts[t] = type_counts.get(t, 0) + 1
         if len(type_counts) > 1:
-            deselect_menu = menu.addMenu("Deselect by type")
-            only_menu = menu.addMenu("Keep only type selected")
+            deselect_menu = menu.addMenu(tr("menu.deselect_type"))
+            only_menu = menu.addMenu(tr("menu.keep_only_type"))
             for t in TextureType:
                 if t in type_counts:
-                    label = f"{t.value} ({type_counts[t]})"
+                    label = tr("menu.type_count", type=type_name(t), count=type_counts[t])
                     deselect_menu.addAction(label, lambda t=t: self._deselect_where(lambda e: e.ttype is t))
                     only_menu.addAction(label, lambda t=t: self._deselect_where(lambda e: e.ttype is not t))
         menu.addSeparator()
 
         selected_mods = sorted({self.model.entries[r].mod for r in rows} | {entry.mod}, key=str.lower)
         hide_label = (
-            f'Hide mod "{selected_mods[0]}"' if len(selected_mods) == 1 else f"Hide {len(selected_mods)} mods"
+            tr("menu.hide_mod", mod=selected_mods[0])
+            if len(selected_mods) == 1
+            else tr("menu.hide_mods", count=len(selected_mods))
         )
         menu.addAction(hide_label, lambda: self._hide_mods(selected_mods))
         selected_authors = sorted(
@@ -657,20 +652,20 @@ class MainDialog(QDialog):
         )
         if self.authors_enabled and selected_authors:
             author_label = (
-                f'Hide author "{selected_authors[0]}"'
+                tr("menu.hide_author", author=self._author_text(selected_authors[0]))
                 if len(selected_authors) == 1
-                else f"Hide {len(selected_authors)} authors"
+                else tr("menu.hide_authors", count=len(selected_authors))
             )
             menu.addAction(author_label, lambda: self._hide_authors(selected_authors))
         if self.hidden_mods or self.hidden_authors:
-            menu.addAction(f"Unhide all ({self._hidden_summary()})", self._unhide_all_mods)
+            menu.addAction(tr("menu.unhide_all", what=self._hidden_summary()), self._unhide_all_mods)
         self._add_fetch_actions(menu, selected_mods)
-        menu.addAction(f'Show only mod "{entry.mod}"', lambda: self._filter_mod(entry.mod))
+        menu.addAction(tr("menu.show_only_mod", mod=entry.mod), lambda: self._filter_mod(entry.mod))
         folder = entry.virtual_path.rsplit("/", 1)[0] + "/"
-        menu.addAction(f'Show only folder "{folder}"', lambda: self._filter_folder(folder))
-        menu.addAction("Reset filters", self._reset_filters)
+        menu.addAction(tr("menu.show_only_folder", folder=folder), lambda: self._filter_folder(folder))
+        menu.addAction(tr("menu.reset_filters"), self._reset_filters)
         menu.addSeparator()
-        menu.addAction("Open containing folder", lambda: os.startfile(entry.abs_path.parent))
+        menu.addAction(tr("menu.open_folder"), lambda: os.startfile(entry.abs_path.parent))
         menu.exec(self.table.viewport().mapToGlobal(pos))
 
     def _deselect_where(self, predicate: Callable[[TextureEntry], bool]) -> None:
@@ -722,10 +717,14 @@ class MainDialog(QDialog):
     def _hidden_summary(self) -> str:
         parts = []
         if n := len(self.hidden_mods):
-            parts.append(f"{n} mod{'s' if n != 1 else ''}")
+            parts.append(tr("count.mods", count=n))
         if n := len(self.hidden_authors):
-            parts.append(f"{n} author{'s' if n != 1 else ''}")
+            parts.append(tr("count.authors", count=n))
         return ", ".join(parts)
+
+    @staticmethod
+    def _author_text(author: str) -> str:
+        return tr("table.author_unknown") if author == UNKNOWN else author
 
     def _update_unhide_button(self) -> None:
         if self.on_hidden_mods_changed is not None and self.hidden_mods != self._initial_hidden_mods:
@@ -734,12 +733,19 @@ class MainDialog(QDialog):
         if self.on_hidden_authors_changed is not None and self.hidden_authors != self._saved_hidden_authors:
             self._saved_hidden_authors = set(self.hidden_authors)
             self.on_hidden_authors_changed(set(self.hidden_authors))
-        self.unhide_btn.setText(f"Unhide {self._hidden_summary()}")
+        self.unhide_btn.setText(tr("hidden.unhide", what=self._hidden_summary()))
         tooltip = []
         if self.hidden_mods:
-            tooltip.append("Hidden mods: " + ", ".join(sorted(self.hidden_mods, key=str.lower)))
+            tooltip.append(tr("hidden.tip_mods", list=", ".join(sorted(self.hidden_mods, key=str.lower))))
         if self.hidden_authors:
-            tooltip.append("Hidden authors: " + ", ".join(sorted(self.hidden_authors, key=str.lower)))
+            tooltip.append(
+                tr(
+                    "hidden.tip_authors",
+                    list=", ".join(
+                        sorted((self._author_text(a) for a in self.hidden_authors), key=str.lower)
+                    ),
+                )
+            )
         self.unhide_btn.setToolTip("\n".join(tooltip))
         self.unhide_btn.setVisible(bool(self.hidden_mods or self.hidden_authors))
 
@@ -765,14 +771,9 @@ class MainDialog(QDialog):
         menu.addSeparator()
         if selected:
             n = len({m for m in selected_mods if self.mod_refs.get(m) in selected})
-            menu.addAction(
-                f"Fetch author for {n} selected mod{'s' if n != 1 else ''}",
-                lambda: self.fetch_authors(selected_mods),
-            )
+            menu.addAction(tr("menu.fetch_selected", count=n), lambda: self.fetch_authors(selected_mods))
         if everything:
-            menu.addAction(
-                f"Fetch all mod authors ({len(everything)} remaining)", lambda: self.fetch_authors(None)
-            )
+            menu.addAction(tr("menu.fetch_all", count=len(everything)), lambda: self.fetch_authors(None))
 
     def _init_authors(self) -> None:
         """Show cached authors; mods never looked up show "Unknown" until fetched."""
@@ -811,7 +812,7 @@ class MainDialog(QDialog):
         refs = self._unfetched_refs(mods)
         if not refs or self.api_key_provider is None:
             if not quiet:
-                self.author_label.setText("Authors: nothing left to look up.")
+                self.author_label.setText(tr("authors.nothing_left"))
                 self.author_label.setVisible(True)
             return
         self._author_queue.extend(refs)
@@ -821,12 +822,12 @@ class MainDialog(QDialog):
 
     def _start_author_worker(self) -> None:
         refs, self._author_queue = self._author_queue, []
-        self.author_label.setText(f"Looking up {len(refs)} mod authors on Nexus...")
+        self.author_label.setText(tr("authors.looking_up", count=len(refs)))
         self.author_label.setVisible(True)
         worker = AuthorWorker(refs, self._author_cache, self.api_key_provider, self)
         worker.found.connect(self._on_author_found)
         worker.progress.connect(
-            lambda n, total: self.author_label.setText(f"Looking up mod authors on Nexus: {n}/{total}")
+            lambda n, total: self.author_label.setText(tr("authors.progress", done=n, total=total))
         )
         worker.finished_msg.connect(lambda msg, refs=refs: self._on_authors_finished(msg, refs))
         self._author_timer.start()
@@ -874,25 +875,18 @@ class MainDialog(QDialog):
         entries = self.model.entries
         plan = output.make_plan(entries, self.manifest, self.output_dir, self.mode)
         if plan.is_empty:
-            msg = "Nothing to do."
-            if plan.skipped:
-                msg += f" All {plan.skipped} marked textures are already downscaled."
-            else:
-                msg += " Mark some textures for downscaling first."
+            msg = tr("run.nothing_all_done", count=plan.skipped) if plan.skipped else tr("run.nothing")
             QMessageBox.information(self, "Texture Downscaler", msg)
             return
 
-        lines = [f"Downscale <b>{len(plan.jobs)}</b> textures into the mod <b>{self.output_name}</b>."]
+        lines = [tr("run.confirm_jobs", count=len(plan.jobs), mod=self.output_name)]
         if plan.skipped:
-            lines.append(f"Skip {plan.skipped} textures that are already done.")
+            lines.append(tr("run.confirm_skip", count=plan.skipped))
         if plan.remove:
-            lines.append(
-                f"Delete {len(plan.remove)} previously downscaled textures (no longer wanted, "
-                f"source changed/removed, or rebuild)."
-            )
-        lines.append("<br>Original mod files are not modified.")
+            lines.append(tr("run.confirm_remove", count=len(plan.remove)))
+        lines.append(tr("run.confirm_originals"))
         if (
-            QMessageBox.question(self, "Start downscaling?", "<br>".join(lines))
+            QMessageBox.question(self, tr("run.confirm_title"), "<br>".join(lines))
             != QMessageBox.StandardButton.Yes
         ):
             return
@@ -902,7 +896,7 @@ class MainDialog(QDialog):
             return
         self.output_dir = output_dir
 
-        progress = QProgressDialog("Downscaling textures...", "Cancel", 0, max(1, len(plan.jobs)), self)
+        progress = QProgressDialog(tr("run.progress"), tr("run.cancel"), 0, max(1, len(plan.jobs)), self)
         progress.setWindowTitle("Texture Downscaler")
         progress.setWindowModality(Qt.WindowModality.WindowModal)
         progress.setMinimumDuration(0)
@@ -916,13 +910,13 @@ class MainDialog(QDialog):
             lambda n, total, name: (
                 progress.setMaximum(max(1, total)),
                 progress.setValue(n),
-                progress.setLabelText(f"Downscaling textures... {n}/{total}\n{name}"),
+                progress.setLabelText(tr("run.progress_n", done=n, total=total, name=name)),
             )
         )
         progress.canceled.connect(lambda: setattr(worker, "cancel", True))
         worker.done.connect(lambda results: self._on_run_done(plan, results, progress))
         worker.failed.connect(
-            lambda tb: (progress.close(), QMessageBox.critical(self, "Downscale failed", tb))
+            lambda tb: (progress.close(), QMessageBox.critical(self, tr("run.failed_title"), tb))
         )
         worker.start()
 
@@ -939,11 +933,11 @@ class MainDialog(QDialog):
             e = by_key[r.job.key]
             if r.ok:
                 e.done_target = e.target
-                e.status = f"Done ({r.job.width}x{r.job.height})"
+                e.status = tr("status.done", width=r.job.width, height=r.job.height)
             elif r.message == "Cancelled":
                 cancelled += 1
             else:
-                e.status = f"Failed: {r.message}"
+                e.status = tr("status.failed", message=r.message)
                 failed.append(r)
         self.model.refresh_rows()
         self._apply_filters()  # newly done rows may now be hidden
@@ -951,15 +945,12 @@ class MainDialog(QDialog):
         self.on_output_written()
 
         ok = len(results) - len(failed) - cancelled
-        msg = f"Downscaled {ok} textures."
+        msg = tr("run.result", count=ok)
         if cancelled:
-            msg += f"\n{cancelled} were cancelled."
+            msg += "\n" + tr("run.result_cancelled", count=cancelled)
         if failed:
-            msg += f"\n{len(failed)} failed (see the Status column)."
-        msg += (
-            f"\n\nMake sure '{self.output_name}' is enabled and placed at the bottom of your mod list "
-            "so it overrides the original textures."
-        )
+            msg += "\n" + tr("run.result_failed", count=len(failed))
+        msg += "\n\n" + tr("run.result_hint", mod=self.output_name)
         box = QMessageBox(
             QMessageBox.Icon.Warning if failed else QMessageBox.Icon.Information,
             "Texture Downscaler",

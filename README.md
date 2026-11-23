@@ -86,6 +86,7 @@ In MO2, go to **Settings → Plugins → Texture Downscaler**:
 |---|---|---|
 | `output_mod_name` | `Texture Downscaler Output` | Name of the mod that receives the downscaled textures |
 | `workers` | `0` | Number of parallel texconv processes (0 = automatic) |
+| `language` | *(empty)* | Interface language, e.g. `en`. Empty = MO2's language if a translation exists, otherwise English. Restart MO2 after changing it. |
 | `hidden_mods`, `sort_state` | | Remembered UI state, managed by the tool |
 
 Caches are stored in `<MO2>/plugins/data/texture_downscaler/`. You can safely delete them; they're rebuilt as needed.
@@ -135,6 +136,17 @@ This mod was made with claude code, but the code has been reviewed and thoroughl
 - At the point of writing this there are 48 unit tests
 - It has been tested with my own personal mod setup with 700 mods
 
+
+## Translations
+
+All interface text lives in `plugin/texture_downscaler/i18n/`. `en.json` is the English reference. To add a language:
+
+1. Copy `en.json` and name the copy after the language code, e.g. `ru.json`, `de.json` or `fr.json`.
+2. Translate the text on the right of each line. Keep the keys on the left and placeholders like `{count}` or `{mod}` unchanged; you can move placeholders to wherever your grammar needs them.
+3. For entries with number-dependent forms (`"one"` / `"other"`), add the forms your language needs. Russian, for example, uses `"one"`, `"few"` and `"many"` (1 текстура, 2 текстуры, 5 текстур).
+4. Put the file in the `i18n` folder and restart MO2. The plugin uses MO2's interface language when a translation for it exists. To force a language, set `language` in the plugin settings.
+
+Anything missing from a translation is shown in English, so a translation that's a bit behind after an update still works. To have a translation included in the official release, open a pull request or an issue on GitHub with the file.
 
 ## License
 

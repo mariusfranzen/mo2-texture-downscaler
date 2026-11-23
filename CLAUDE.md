@@ -46,7 +46,9 @@ plugin/texture_downscaler/      # the MO2 plugin package (copied/linked into <MO
     nexus.py                    # Nexus uploader lookup + cache, MO2 API key from Credential Manager
     header_cache.py             # persistent DDS header cache (path + size + mtime)
     downscaler.py               # target size math, texconv command/job runner (thread pool)
+    i18n.py                     # tr(): JSON string lookup, English fallback, plural rules
     output.py                   # manifest (texture_downscaler.json in output mod), make_plan()
+  i18n/en.json                  # all UI strings (English reference); translations go next to it
   ui/                           # PyQt6 only, no mobase
     table_model.py              # QAbstractTableModel + filter proxy
     workers.py                  # QThread scan / downscale workers
@@ -110,6 +112,19 @@ assets/logo.png                 # 2048px logo (README header); the plugin ships 
   - Mods without a Nexus ID, or with a game domain that can't be resolved, show "Unknown".
   - "Hide author" is saved in the plugin setting `hidden_authors`; search also matches authors.
 - Saved sort settings store column *names*, so adding columns doesn't scramble them.
+- **i18n:** all user-visible text goes through `tr("key", **placeholders)` from `core/i18n.py`
+  (plain Python). Strings live in `plugin/texture_downscaler/i18n/en.json`, the reference. Other
+  languages are `<code>.json` files layered on top, with English as the per-key fallback.
+  - Plural entries are `{"one": ..., "other": ...}` objects selected by `count=`. `PLURAL_RULES`
+    maps languages like ru/pl/cs to their extra forms (few/many).
+  - The language comes from the plugin setting `language`, else MO2's `[Settings] language` in
+    `ModOrganizer.ini`, else Windows' UI languages, else English. It's loaded in `init()`.
+  - Internal IDs stay English: `HEADERS` (saved in `sort_state`), `TextureType` values and the
+    `UNKNOWN` author marker. Show them via `column_title()`, `type_name()` and `author_text()`.
+  - Only English ships in this repo; translators contribute other files.
+  - `tests/test_i18n.py` checks that every `tr()` key exists in en.json and every en.json key is
+    used, that placeholders are valid, and that no hard-coded English remains in UI widget calls.
+    When adding UI text, add the key to en.json.
 - MO2 API calls happen on the main thread. Scanning and texconv run in `QThread`s.
   texconv processes run in parallel (plugin setting `workers`, 0 = auto).
 

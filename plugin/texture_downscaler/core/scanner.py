@@ -15,6 +15,7 @@ from typing import Protocol
 
 from .dds import DdsInfo, read_dds_info
 from .header_cache import HeaderCache
+from .i18n import tr
 from .texture_types import TextureType, classify
 
 ProgressFn = Callable[[int, int, str], None]  # (done, total, message)
@@ -118,7 +119,7 @@ def scan(
     for i, source in enumerate(sources):
         if cancelled():
             return []
-        progress(i, len(sources), f"Listing files: {source.name}")
+        progress(i, len(sources), tr("scan.listing", mod=source.name))
         for f in source.iter_textures():
             key = f.virtual_path.lower()
             winners[key] = (source.name, f)
@@ -162,7 +163,7 @@ def scan(
                 if entry is not None:
                     entries.append(entry)
                 if n % 500 == 0 or n == total:
-                    progress(n, total, f"Reading new/changed texture headers ({n}/{total})")
+                    progress(n, total, tr("scan.reading", done=n, total=total))
                 if cancelled():
                     return []
 

@@ -11,6 +11,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from ..core import nexus, output
 from ..core.downscaler import JobResult, run_jobs
 from ..core.header_cache import HeaderCache
+from ..core.i18n import tr
 from ..core.nexus import AuthorCache, NexusRef
 from ..core.output import Manifest, Plan
 from ..core.scanner import TextureEntry, TextureSource, scan
@@ -70,7 +71,7 @@ class DownscaleWorker(QThread):
 
     def _run(self):
         if self.plan.remove:
-            self.progress.emit(0, 0, f"Removing {len(self.plan.remove)} previous outputs...")
+            self.progress.emit(0, 0, tr("run.removing", count=len(self.plan.remove)))
             output.remove_outputs(self.plan.remove, self.manifest, self.output_dir)
             self.manifest.save(self.output_dir)
 
@@ -115,9 +116,7 @@ class AuthorWorker(QThread):
         try:
             api_key = self.api_key_provider()
             if not api_key:
-                self.finished_msg.emit(
-                    "Authors: no Nexus API key found. Log in to Nexus in MO2's settings (Nexus tab)."
-                )
+                self.finished_msg.emit(tr("authors.no_key"))
                 return
             total = len(self.refs)
             count = [0]
@@ -130,4 +129,4 @@ class AuthorWorker(QThread):
             msg = nexus.fetch_missing(self.refs, self.cache, api_key, on_result, lambda: self.cancel)
             self.finished_msg.emit(msg)
         except Exception:
-            self.finished_msg.emit("Authors: lookup failed.\n" + traceback.format_exc(limit=3))
+            self.finished_msg.emit(tr("authors.failed") + "\n" + traceback.format_exc(limit=3))

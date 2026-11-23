@@ -13,6 +13,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from .downscaler import Job, target_size
+from .i18n import tr
 from .scanner import TextureEntry
 
 MANIFEST_NAME = "texture_downscaler.json"
@@ -84,9 +85,9 @@ def apply_manifest(entries: list[TextureEntry], manifest: Manifest, output_dir: 
         entry.target = m.target
         if is_current(m, entry, output_dir):
             entry.done_target = m.target
-            entry.status = f"Done ({m.width}x{m.height})"
+            entry.status = tr("status.done", width=m.width, height=m.height)
         else:
-            entry.status = "Source changed - will redo"
+            entry.status = tr("status.source_changed")
 
 
 @dataclass(slots=True)
