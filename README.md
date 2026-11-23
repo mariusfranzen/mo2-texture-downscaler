@@ -148,6 +148,8 @@ This mod was made with claude code, but the code has been reviewed and thoroughl
 
 ## Translations
 
+Included languages: English and Russian. The plugin follows MO2's interface language automatically.
+
 All interface text lives in `plugin/texture_downscaler/i18n/`. `en.json` is the English reference. To add a language:
 
 1. Copy `en.json` and name the copy after the language code, e.g. `ru.json`, `de.json` or `fr.json`.
@@ -169,3 +171,4 @@ The bundled texconv is licensed separately under the MIT license (see `plugin/te
 
 - [DirectXTex / texconv](https://github.com/microsoft/DirectXTex) by Microsoft (MIT license, see `plugin/texture_downscaler/bin/LICENSE-texconv.txt`)
 - [Mod Organizer 2](https://github.com/ModOrganizer2/modorganizer)
+- Russian translation by [subirs](https://www.nexusmods.com/profile/subirs)

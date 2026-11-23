@@ -59,6 +59,7 @@ scripts/dev_link.ps1            # junction plugin into an MO2 install
 scripts/make_release.ps1        # build the release ZIP from tag v<__version__> (never tags/pushes)
 scripts/make_icon.py            # regenerate plugin icon.png (256px) from assets/logo.png
 assets/logo.png                 # 2048px logo (README header); the plugin ships only icon.png
+docs/nexus-description.bbcode   # Nexus mod page text (BBCode); keep in sync with README
 ```
 
 ## Key behaviours
@@ -123,7 +124,9 @@ assets/logo.png                 # 2048px logo (README header); the plugin ships 
     `ModOrganizer.ini`, else Windows' UI languages, else English. It's loaded in `init()`.
   - Internal IDs stay English: `HEADERS` (saved in `sort_state`), `TextureType` values and the
     `UNKNOWN` author marker. Show them via `column_title()`, `type_name()` and `author_text()`.
-  - Only English ships in this repo; translators contribute other files.
+  - English and Russian (`ru.json`, contributed by a translator) ship in this repo. Translators
+    contribute other files; credit them in the README and Nexus description Credits. When English
+    text changes meaning, drop the stale key from translations so English shows instead.
   - `tests/test_i18n.py` checks that every `tr()` key exists in en.json and every en.json key is
     used, that placeholders are valid, and that no hard-coded English remains in UI widget calls.
     When adding UI text, add the key to en.json.

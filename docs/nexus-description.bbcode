@@ -1,0 +1,114 @@
+[center][size=6][b]Texture Downscaler[/b][/size]
+[size=3]A Mod Organizer 2 tool plugin for Skyrim Special / Anniversary Edition[/size][/center]
+
+[line]
+
+[size=4][color=#ff9900][b]⚠ This is an MO2 plugin, not a regular mod[/b][/color][/size]
+[b]Do not install it with Mod Organizer's "Install mod" or the Mod Manager button.[/b] Extract the ZIP into your MO2 [b]plugins[/b] folder instead (see Installation below).
+
+[line]
+
+[size=5][b]What it does[/b][/size]
+High-resolution texture packs add up quickly and can eat all your VRAM. Texture Downscaler scans every enabled mod in your load order, shows you which textures are the biggest, and lets you downscale exactly the ones you choose (for example: "all 4K normal maps to 2K, but leave faces and armor alone").
+
+Your original mods are [b]never modified[/b]. The downscaled textures go into a separate mod, [i]Texture Downscaler Output[/i], at the bottom of your load order. Disable or delete that mod and everything is back to how it was.
+
+[size=5][b]Features[/b][/size]
+[list]
+[*][b]Scans your whole load order in seconds[/b] (about 60,000 textures across 700 mods in a few seconds, and under a second on later opens thanks to a cache)[/*]
+[*][b]Only shows what the game actually loads:[/b] when several mods provide the same texture, only the winning file is listed[/*]
+[*][b]Sortable, filterable table:[/b] resolution, format, file size, texture type (diffuse, normal, specular, glow, ...) and mod[/*]
+[*]Filter by mod, folder, texture type or search text, hide textures below a certain size, and hide mods you never want to touch (remembered between sessions)[/*]
+[*][b]Bulk tools:[/b] size rules ("everything larger than 4K → 2K") and a maximum size per texture type[/*]
+[*]Shows the [b]estimated VRAM saving[/b] before you start[/*]
+[*][b]Keeps quality:[/b] the original compression format (BC1/BC3/BC5/BC7, including sRGB) and aspect ratio are kept, and mipmaps are regenerated, using Microsoft's texconv (bundled)[/*]
+[*][b]Safe re-runs:[/b] skips textures that are already done, redoes ones whose source mod was updated, and removes outputs you no longer want, or rebuilds everything from scratch[/*]
+[/list]
+
+[size=5][b]Requirements[/b][/size]
+[list]
+[*]Mod Organizer 2 [b]2.5 or newer[/b][/*]
+[*]Skyrim Special Edition or Anniversary Edition[/*]
+[*]Texture mods installed as [b]loose files[/b] (textures inside BSA archives aren't supported yet)[/*]
+[/list]
+Nothing else is needed; texconv is included.
+
+[size=5][b]Installation[/b][/size]
+[list=1]
+[*]Download the main file (manual download).[/*]
+[*]Extract it into your MO2 [b]plugins[/b] folder, so you end up with [i][color=#ffffff]<MO2 folder>/plugins/texture_downscaler/__init__.py[/color][/i]
+[/*]
+[*]Restart Mod Organizer 2.[/*]
+[*]Open it from the [b]Tools[/b] menu (puzzle-piece icon) → [b]Texture Downscaler[/b].[/*]
+[/list]
+
+[size=5][b]How to use[/b][/size]
+[list=1]
+[*]Open the tool. It lists your textures, largest first.[/*]
+[*]Use the filters to narrow things down, or right-click → [i]Hide mod[/i] for mods you don't want to touch.[/*]
+[*]Mark textures for downscaling:
+[list]
+[*][b]Basic[/b] tab: select rows, pick a size, click [i]Mark for downscaling[/i][/*]
+[*][b]Batch[/b] tab: apply a size rule or per-type limits to everything currently shown[/*]
+[/list]
+[/*]
+[*]Click [b]Downscale N marked textures...[/b] Nothing is written before this step.[/*]
+[*]Make sure [i]Texture Downscaler Output[/i] is enabled and at the [b]bottom[/b] of your mod list (the tool does this when it creates the mod).[/*]
+[/list]
+
+[size=5][b]What should I downscale?[/b][/size]
+From least to most noticeable:
+[list=1]
+[*][b]Specular / mask, glow, parallax and environment maps:[/b] usually invisible when reduced one or two steps[/*]
+[*][b]Normal maps:[/b] you lose fine surface detail, often hard to see at normal distance[/*]
+[*][b]Diffuse (colour) maps:[/b] blur shows up here first, so keep these highest[/*]
+[/list]
+A good starting point for a 4K-heavy setup: diffuse 4K, normal 2K, specular/mask, glow and parallax 1K, environment 512.
+Small clutter (bottles, books, food) can go much lower. Be more careful with faces, bodies and large surfaces you see up close.
+
+[size=5][b]VRAM vs. disk space[/b][/size]
+[list]
+[*][b]VRAM:[/b] compressed textures take about as much video memory as their file size. The saving shown is an upper bound, because the game only loads textures for what's around you.[/*]
+[*][b]Disk:[/b] disk usage goes [b]up[/b] by the size of the downscaled copies. Your originals stay where they are; the output mod simply wins the conflict.[/*]
+[/list]
+
+[size=5][b]Updating, re-running and undoing[/b][/size]
+The output mod remembers what was downscaled. When you open the tool again, you can either [b]keep and skip[/b] what's already done, or [b]rebuild from scratch[/b].
+To undo everything, disable or delete [i]Texture Downscaler Output[/i]. The tool only ever deletes files it wrote itself.
+
+[size=5][b]Uninstalling[/b][/size]
+Delete [i]plugins/texture_downscaler[/i], the [i]Texture Downscaler Output[/i] mod, and [i]plugins/data/texture_downscaler[/i] (cache files).
+
+[size=5][b]Known limitations[/b][/size]
+[list]
+[*]Only loose textures are scanned (no BSA support yet)[/*]
+[*]Textures in MO2's Overwrite folder aren't scanned[/*]
+[*]Skyrim SE/AE only for now[/*]
+[/list]
+
+[size=5][b]Bug reports[/b][/size]
+Please include your MO2 version and any related lines from [i]ModOrganizer.log[/i] (in your MO2 [i]logs[/i] folder). Bug reports are also welcome on [url=https://github.com/mariusfranzen/mo2-texture-downscaler/issues]GitHub[/url].
+
+[size=5][b]Translations[/b][/size]
+Included languages: [b]English[/b] and [b]Russian[/b]. The plugin follows MO2's interface language automatically.
+
+All interface text lives in [i]<MO2 folder>/plugins/texture_downscaler/i18n/[/i]. [i]en.json[/i] is the English reference. To add a language:
+[list=1]
+[*]Copy [i]en.json[/i] and name the copy after the language code, e.g. [i]ru.json[/i], [i]de.json[/i] or [i]fr.json[/i].[/*]
+[*]Translate the text on the right of each line. Keep the keys on the left and placeholders like [b]{count}[/b] or [b]{mod}[/b] unchanged; you can move placeholders to wherever your grammar needs them.[/*]
+[*]For entries with number-dependent forms ([b]"one"[/b] / [b]"other"[/b]), add the forms your language needs. Russian, for example, uses [b]"one"[/b], [b]"few"[/b] and [b]"many"[/b] (1 текстура, 2 текстуры, 5 текстур).[/*]
+[*]Put the file in the [i]i18n[/i] folder and restart MO2. The plugin uses MO2's interface language when a translation for it exists. To force a language, set [b]language[/b] in the plugin settings (MO2 → Settings → Plugins → Texture Downscaler).[/*]
+[/list]
+Anything missing from a translation is shown in English, so a translation that's a bit behind after an update still works. To have a translation included in the official release, open a pull request or an issue on [url=https://github.com/mariusfranzen/mo2-texture-downscaler]GitHub[/url] with the file, or send it to me here on Nexus.
+
+[line]
+
+[size=5][b]Source code & license[/b][/size]
+Open source under the [b]GNU GPL v3[/b]: [url=https://github.com/mariusfranzen/mo2-texture-downscaler]github.com/mariusfranzen/mo2-texture-downscaler[/url]
+
+[size=5][b]Credits[/b][/size]
+[list]
+[*][url=https://github.com/microsoft/DirectXTex]DirectXTex / texconv[/url] by Microsoft (MIT license)[/*]
+[*]The [url=https://github.com/ModOrganizer2/modorganizer]Mod Organizer 2[/url] team[/*]
+[*]Russian translation by [url=https://www.nexusmods.com/profile/subirs]subirs[/url][/*]
+[/list]
